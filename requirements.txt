@@ -1,0 +1,13 @@
+requests>=2.31
+shapely>=2.0
+pyproj>=3.6
+pandas>=2.2
+geopandas>=0.14
+fiona>=1.9
+pdfplumber>=0.10
+
+# pinned for stability of spatial index API
+rtree>=1.1
+
+# tests
+pytest>=8.0

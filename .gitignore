@@ -2,3 +2,14 @@
 node_modules/
 *.log
 .env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ETL caches (raw fetched data, intermediates) — final outputs are committed
+data/raw/
+data/cache/
+data/processed/
