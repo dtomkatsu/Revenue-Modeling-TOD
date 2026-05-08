@@ -58,11 +58,34 @@ REVENUE_PATH   = _ROOT / "data" / "processed" / "parcels_revenue.geojson"
 COSTS_PATH     = _ROOT / "data" / "processed" / "parcels_costs.geojson"
 STATIONS_PATH  = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojson"
 ADDRESSES_PATH = _ROOT / "data" / "raw"       / "address_points.geojson"
+GUIDEWAY_PATH  = _ROOT / "data" / "raw"       / "rail_transit_guideway_alignment_line.geojson"
 
 OUTPUT_PARCELS  = _ROOT / "data" / "parcels_tod.geojson"
 OUTPUT_STATIONS = _ROOT / "data" / "stations.geojson"
+OUTPUT_RAIL     = _ROOT / "data" / "rail_line.geojson"
 
 WGS84 = 4326
+# Hawaii Zone 3, US-survey-feet — same projected CRS as step 07 frontage work.
+# Used to buffer the guideway centerline by a fixed-foot half-width so the
+# resulting ribbon is uniform on the ground (lat/lng buffering distorts).
+HI_FEET = 2783
+
+# Skyline guideway is mostly a viaduct ~30 ft wide at the deck. We render it
+# as a translucent fill-extrusion ribbon, so the geometry is a half-width
+# buffer of the centerline. 18 ft total width (±9) reads cleanly at z14–15
+# without overpowering the parcel extrusions.
+RAIL_HALFWIDTH_FT = 9.0
+
+# Guideway feature_name values that are currently operating (Segments 1+2:
+# West Oahu/Farrington + Kamehameha Highway opened 2023-06; Airport opened
+# 2025-10). City Center Section is still under construction as of 2026-05
+# and is excluded so the ribbon ends at Kahauiki/Middle St where service
+# actually ends.
+OPERATING_RAIL_SECTIONS = (
+    "West Oahu/Farrington Highway Section",
+    "Kamehameha Highway Section",
+    "Airport Section",
+)
 
 # IDs of the 13 currently operating Skyline stations (Segments 1+2). Mirrors
 # etl/04_build_walksheds.EXPECTED_STATIONS keys.
@@ -122,10 +145,13 @@ def emit_frontend(*, force: bool) -> int:
 
     p_manifest = OUTPUT_PARCELS.with_suffix(OUTPUT_PARCELS.suffix + ".manifest.json")
     s_manifest = OUTPUT_STATIONS.with_suffix(OUTPUT_STATIONS.suffix + ".manifest.json")
+    r_manifest = OUTPUT_RAIL.with_suffix(OUTPUT_RAIL.suffix + ".manifest.json")
     if (not force
             and OUTPUT_PARCELS.exists()  and p_manifest.exists()
-            and OUTPUT_STATIONS.exists() and s_manifest.exists()):
-        print(f"[skip] {OUTPUT_PARCELS.name}, {OUTPUT_STATIONS.name} (cached)")
+            and OUTPUT_STATIONS.exists() and s_manifest.exists()
+            and OUTPUT_RAIL.exists()     and r_manifest.exists()):
+        print(f"[skip] {OUTPUT_PARCELS.name}, {OUTPUT_STATIONS.name}, "
+              f"{OUTPUT_RAIL.name} (cached)")
         return 0
 
     rev_manifest = read_manifest(REVENUE_PATH)
@@ -270,6 +296,62 @@ def emit_frontend(*, force: bool) -> int:
         },
     )
     print(f"[done] {OUTPUT_STATIONS.relative_to(_ROOT)} ({len(operating)} stations)")
+
+    # ---- Rail line ribbon ----------------------------------------------
+    # Buffer the operating Skyline guideway centerlines into a thin polygon
+    # ribbon. The frontend extrudes this with fill-extrusion-base ~10 m and
+    # height ~14 m, producing a translucent cyan band that sits at viaduct
+    # elevation above the parcel bars (which start at ground).
+    if not GUIDEWAY_PATH.exists():
+        print(f"[warn] {GUIDEWAY_PATH.name} not present; skipping rail ribbon. "
+              f"Run `python etl/01_fetch_arcgis.py "
+              f"rail_transit_guideway_alignment_line` to fetch it.")
+    else:
+        print(f"[read] {GUIDEWAY_PATH.relative_to(_ROOT)}")
+        guideway = gpd.read_file(GUIDEWAY_PATH)
+        # ArcGIS publishes Center, Eastbound, and Westbound alignments per
+        # section. Use only the Center to avoid a triple-thick ribbon.
+        keep = (
+            guideway["feature_name"].isin(OPERATING_RAIL_SECTIONS)
+            & (guideway["feature_desc"] == "Center Alignment")
+        )
+        center = guideway[keep].copy()
+        if center.empty:
+            raise ValueError(
+                "no rail-guideway features matched OPERATING_RAIL_SECTIONS; "
+                "check feature_name/desc values upstream"
+            )
+        # Buffer in projected feet for a uniform ribbon, then dissolve so
+        # the frontend gets a single MultiPolygon feature.
+        ribbon = center.to_crs(HI_FEET)
+        ribbon["geometry"] = ribbon.geometry.buffer(RAIL_HALFWIDTH_FT)
+        dissolved = ribbon.dissolve()
+        dissolved = dissolved.to_crs(WGS84)
+        rail_out = gpd.GeoDataFrame(
+            {"name": ["Skyline guideway"]},
+            geometry=dissolved.geometry.values,
+            crs=f"EPSG:{WGS84}",
+        )
+
+        if OUTPUT_RAIL.exists():
+            OUTPUT_RAIL.unlink()
+        rail_out.to_file(OUTPUT_RAIL, driver="GeoJSON")
+        write_manifest(
+            OUTPUT_RAIL,
+            source_url=f"file://{GUIDEWAY_PATH}",
+            row_count=len(rail_out),
+            script=SCRIPT_NAME,
+            extras={
+                "halfwidth_ft":   RAIL_HALFWIDTH_FT,
+                "buffer_crs":     f"EPSG:{HI_FEET}",
+                "operating_only": True,
+                "sections":       list(OPERATING_RAIL_SECTIONS),
+                "crs":            f"EPSG:{WGS84}",
+            },
+        )
+        print(f"[done] {OUTPUT_RAIL.relative_to(_ROOT)} "
+              f"({len(center)} centerlines → 1 dissolved ribbon)")
+
     return 0
 
 

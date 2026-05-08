@@ -33,6 +33,7 @@ const STATE = {
   stationId: '',
   parcels: null,        // raw FeatureCollection
   stations: null,
+  railLine: null,       // buffered Skyline guideway ribbon polygon
   filtered: [],         // currently visible parcel features
   domain: [0, 1],       // [min, max] of color metric (98th-pct clipped)
   heightDomain: [0, 1], // [min, max] of rev_per_ac across visible parcels
@@ -77,13 +78,13 @@ const map = new maplibregl.Map({
 });
 
 // Once the vector style finishes loading, recolor the ocean and hide POI/
-// transit clutter so our parcel bars stay the focal point.
+// transit clutter so our parcel bars stay the focal point. Suburb/
+// neighbourhood names get added later as floating HTML badges (see
+// addAreaBadges) — symbol-layer text was too faint to read over parcels.
 map.on('style.load', () => {
-  // Soft Pacific blue. The OpenMapTiles schema names this layer 'water'.
   if (map.getLayer('water')) {
     map.setPaintProperty('water', 'fill-color', '#a8d5e2');
   }
-  // Hide layers that compete with our parcel viz.
   const hideIfPresent = [
     'poi', 'poi-housenumber', 'poi-non-essential',
     'transit-station-label', 'transit_stop_label',
@@ -99,12 +100,14 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right'
 
 map.on('load', async () => {
   try {
-    const [parcels, stations] = await Promise.all([
+    const [parcels, stations, railLine] = await Promise.all([
       fetchJSON('data/parcels_tod.geojson'),
       fetchJSON('data/stations.geojson'),
+      fetchJSON('data/rail_line.geojson'),
     ]);
     STATE.parcels = parcels;
     STATE.stations = stations;
+    STATE.railLine = railLine;
 
     populateStationDropdown(stations);
     addLayers();
@@ -114,6 +117,11 @@ map.on('load', async () => {
     // is still hidden (opacity 0 in CSS). Camera moves between zooms are
     // invisible to the user; only the cache fills.
     await prewarmOahuTiles();
+    // querySourceFeatures only sees features in CURRENTLY-loaded tiles. We
+    // just walked the camera over Oahu z8–z11 in prewarm, so the place
+    // tiles for the whole island are loaded — perfect time to harvest
+    // suburb/neighbourhood centroids for the area badges.
+    addAreaBadges();
     // 3D is on by default — pose the final view and reveal the map.
     map.jumpTo({
       center: [-157.95, 21.38],
@@ -143,6 +151,41 @@ async function fetchJSON(url) {
 //
 // jumpTo() loads only the *current viewport* of tiles, so at z10/z11 (where
 // Oahu is wider than one viewport) we sweep multiple centers to cover it.
+// Pull suburb + neighbourhood place features out of the loaded basemap
+// tiles and render each as a floating HTML badge anchored at its centroid.
+// Vector tiles repeat features across tile boundaries — dedupe by name so
+// a place doesn't get N stacked markers. Suburbs are rendered prominently
+// (uppercase, slate background), neighbourhoods more subdued via the
+// .area-badge.neighbourhood modifier so the visual hierarchy reads.
+function addAreaBadges() {
+  const seen = new Set();
+  let added = 0;
+  for (const cls of ['suburb', 'neighbourhood']) {
+    const features = map.querySourceFeatures('openmaptiles', {
+      sourceLayer: 'place',
+      filter: ['==', ['get', 'class'], cls],
+    });
+    for (const f of features) {
+      const name = f.properties.name_en || f.properties.name;
+      if (!name || seen.has(name)) continue;
+      // Vector-tile point features have geometry.coordinates as [lng, lat].
+      const coords = f.geometry?.type === 'Point' && f.geometry.coordinates;
+      if (!coords) continue;
+      seen.add(name);
+      const el = document.createElement('div');
+      el.className = cls === 'neighbourhood'
+        ? 'area-badge neighbourhood'
+        : 'area-badge';
+      el.textContent = name;
+      new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat(coords)
+        .addTo(map);
+      added += 1;
+    }
+  }
+  console.log(`[areas] ${added} badges placed`);
+}
+
 async function prewarmOahuTiles() {
   const sweeps = [
     { zoom:  8, centers: [[-157.95, 21.45]] },
@@ -238,6 +281,32 @@ function addLayers() {
     },
   });
 
+  // Skyline guideway as a translucent cyan ribbon. Real-world viaduct sits
+  // ~30 ft (9 m) above ground, but our parcel extrusions are scaled to a
+  // 500 m visualization peak (data bars, not building heights). At realistic
+  // viaduct elevation the ribbon would be permanently buried under data bars,
+  // so we lift it to ~120 m where it floats clearly above the cityscape and
+  // reads as an "above-it-all" route. Translucent + no vertical gradient so
+  // the band looks like a glowing track rather than a shaded box. Hidden in
+  // 2D mode along with the parcel extrusion.
+  // Skyline guideway as a 2D ghost-trace that bleeds through parcel
+  // extrusions. Plain fill drawn after the extrusion in style order; while
+  // it does depth-test against the framebuffer, the alpha-blend with the
+  // translucent parcel surfaces lets the rail color come through. Hidden in
+  // 2D mode along with the parcels.
+  map.addSource('rail-line', { type: 'geojson', data: STATE.railLine });
+  map.addLayer({
+    id: 'rail-line-xray',
+    type: 'fill',
+    source: 'rail-line',
+    layout: { visibility: STATE.extrude ? 'visible' : 'none' },
+    paint: {
+      'fill-color': '#06b6d4',
+      'fill-opacity': 0.32,
+      'fill-antialias': false,
+    },
+  });
+
   // Ground-level outline of the hovered parcel — visible in both 2D and 3D
   // (in 3D it shows up as a ring at the base of the lit-up bar).
   map.addLayer({
@@ -268,11 +337,29 @@ function addLayers() {
 
   // Floating glass-panel station labels — HTML markers (not symbol layer)
   // because symbol layers have no Z-axis. The negative pixel offset lifts
-  // the label above the cyan dot, giving a "floating" look in 3D.
+  // the label above the cyan dot, giving a "floating" look in 3D. A small
+  // train glyph distinguishes these from the area-name badges at a glance.
+  // SVG icon is the Material "directions_subway" path; currentColor lets
+  // it inherit from the badge text color.
+  const TRAIN_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" ' +
+    'aria-hidden="true">' +
+    '<path d="M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2.23l' +
+    '2-2h3.54l2 2H18v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-3.58-4-8-4zM' +
+    '7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 ' +
+    '17zM11 11H6V6.5h5V11zm2 0V6.5h5V11h-5zm3.5 6c-.83 0-1.5-.67-1.5-1.5s.67-' +
+    '1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>';
   for (const f of STATE.stations.features) {
     const el = document.createElement('div');
     el.className = 'station-floater';
-    el.textContent = getStationName(f);
+    const icon = document.createElement('span');
+    icon.className = 'station-icon';
+    icon.innerHTML = TRAIN_SVG;
+    const name = document.createElement('span');
+    name.className = 'station-name';
+    name.textContent = getStationName(f);
+    el.appendChild(icon);
+    el.appendChild(name);
     new maplibregl.Marker({ element: el, offset: [0, -32], anchor: 'bottom' })
       .setLngLat(f.geometry.coordinates)
       .addTo(map);
@@ -303,14 +390,16 @@ function bindHoverPopup() {
     const p = f.properties;
     setHover(p.tmk ?? null);
     const addr = p.address && p.address !== 'null' ? p.address : null;
+    // Highlight the row matching the active metric in teal (.primary).
+    const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
     const html = `
       <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
       ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
-      <div class="pp-row"><span class="k">Revenue / ac</span><span>${fmtUSDk(+p.rev_per_ac)}</span></div>
-      <div class="pp-row"><span class="k">Cost / ac</span><span>${fmtUSDk(+p.cost_per_ac)}</span></div>
-      <div class="pp-row"><span class="k">Net / ac</span><span>${fmtUSDk(+p.net_per_ac)}</span></div>
-      ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span>${(+p.area_ac).toFixed(2)}</span></div>` : ''}
-      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span>${escapeHTML(String(p.land_use))}</span></div>` : ''}
+      <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+      <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
+      <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
+      ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
+      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
     `;
     popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
   };
@@ -344,9 +433,10 @@ function wireUI() {
 
   document.getElementById('extrude-toggle').addEventListener('change', (e) => {
     STATE.extrude = e.target.checked;
-    map.setLayoutProperty('parcels-fill',    'visibility', STATE.extrude ? 'none' : 'visible');
-    map.setLayoutProperty('parcels-outline', 'visibility', STATE.extrude ? 'none' : 'visible');
-    map.setLayoutProperty('parcels-extrude', 'visibility', STATE.extrude ? 'visible' : 'none');
+    map.setLayoutProperty('parcels-fill',     'visibility', STATE.extrude ? 'none' : 'visible');
+    map.setLayoutProperty('parcels-outline',  'visibility', STATE.extrude ? 'none' : 'visible');
+    map.setLayoutProperty('parcels-extrude',  'visibility', STATE.extrude ? 'visible' : 'none');
+    map.setLayoutProperty('rail-line-xray',   'visibility', STATE.extrude ? 'visible' : 'none');
     if (STATE.extrude) {
       // 3D needs both pitch and zoom to be visible — pitch up to near max,
       // zoom in enough that 30–1500m bars register as buildings.
@@ -519,7 +609,7 @@ function renderSummary() {
     <div class="row"><span class="k">Acres</span><span class="v">${fmtInt.format(Math.round(totalAcres))}</span></div>
     <div class="row"><span class="k">Total revenue</span><span class="v">${fmtUSDk(totalRev)}</span></div>
     <div class="row"><span class="k">Total cost</span><span class="v">${fmtUSDk(totalCost)}</span></div>
-    <div class="row"><span class="k">Net</span><span class="v" style="color:${totalNet >= 0 ? '#15803d' : '#b91c1c'}">${fmtUSDk(totalNet)}</span></div>
+    <div class="row"><span class="k">Net</span><span class="v ${totalNet >= 0 ? 'net-pos' : 'net-neg'}">${fmtUSDk(totalNet)}</span></div>
   ` : `<p class="muted" style="margin:0;font-size:11px;">Add an <code>acres</code> property to parcels for absolute totals.</p>`;
 
   el.innerHTML = `

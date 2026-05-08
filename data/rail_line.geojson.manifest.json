@@ -1,0 +1,16 @@
+{
+  "output": "rail_line.geojson",
+  "source_url": "file:///Users/dtomkatsu/Revenue-Modeling-TOD/data/raw/rail_transit_guideway_alignment_line.geojson",
+  "row_count": 1,
+  "script": "etl/08_emit_frontend_data.py (rail-only one-off)",
+  "fetched_at": "2026-05-08T08:12:42+00:00",
+  "halfwidth_ft": 9.0,
+  "buffer_crs": "EPSG:2783",
+  "operating_only": true,
+  "sections": [
+    "West Oahu/Farrington Highway Section",
+    "Kamehameha Highway Section",
+    "Airport Section"
+  ],
+  "crs": "EPSG:4326"
+}

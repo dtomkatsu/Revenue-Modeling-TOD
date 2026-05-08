@@ -1,11 +1,30 @@
+/* Palette (per design guide):
+   #CAD2C5  ash grey         — supporting backgrounds, body text on dark
+   #6B9E78  muted teal       — logo / primary accent (active states, key UI)
+   #52796F  deep teal        — supporting backgrounds, secondary borders
+   #354F52  dark slate grey  — inset surfaces (summary panel, popups)
+   #2F3E46  charcoal blue    — primary surface (sidebar, popups)
+   #FFFFFF  white            — emphasized text, key numbers                  */
 :root {
   --sidebar-w: 320px;
-  --bg: #fafafa;
-  --panel: #ffffff;
-  --border: #e4e4e7;
-  --text: #18181b;
-  --muted: #71717a;
-  --accent: #0ea5e9;
+
+  --c-charcoal:  #2F3E46;
+  --c-slate:     #354F52;
+  --c-deep-teal: #52796F;
+  --c-teal:      #6B9E78;
+  --c-ash:       #CAD2C5;
+  --c-white:     #FFFFFF;
+
+  --bg:          var(--c-charcoal);
+  --panel:       var(--c-charcoal);
+  --panel-inset: var(--c-slate);
+  --border:      rgba(82, 121, 111, 0.35);  /* deep-teal at low alpha       */
+  --border-soft: rgba(202, 210, 197, 0.10); /* ash at very low alpha        */
+  --text:        var(--c-white);
+  --text-soft:   var(--c-ash);
+  --muted:       rgba(202, 210, 197, 0.55); /* ash at half alpha            */
+  --accent:      var(--c-teal);
+  --accent-deep: var(--c-deep-teal);
 }
 
 * { box-sizing: border-box; }
@@ -29,40 +48,63 @@ body {
   flex: 0 0 var(--sidebar-w);
   height: 100vh;
   overflow-y: auto;
-  background: var(--panel);
+  /* Soft vertical gradient so the panel doesn't read as a flat block —
+     bottom slightly lighter than top, suggesting depth without distraction. */
+  background: linear-gradient(180deg, var(--c-charcoal) 0%, #324349 100%);
   border-right: 1px solid var(--border);
-  padding: 16px;
+  padding: 18px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  color: var(--text-soft);
+  /* Subtle inner-left accent line in muted teal — gives the panel an
+     identity edge without an opaque colored bar across the whole top. */
+  box-shadow: inset 3px 0 0 var(--c-teal);
 }
 
+#sidebar header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
 #sidebar header h1 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 700;
   letter-spacing: -0.01em;
+  color: var(--c-white);
 }
-
+#sidebar header h1::before {
+  /* Tiny teal pip before the title — branded touchpoint. */
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--c-teal);
+  margin-right: 9px;
+  vertical-align: middle;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 3px rgba(107, 158, 120, 0.18);
+}
 #sidebar header .subtitle {
-  margin: 2px 0 0;
-  color: var(--muted);
+  margin: 4px 0 0 16px;
+  color: var(--text-soft);
+  opacity: 0.7;
   font-size: 12px;
 }
 
 .control {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .control > label,
 .control > h2 {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  letter-spacing: 0.08em;
+  color: var(--c-teal);
   margin: 0;
 }
 
@@ -72,49 +114,70 @@ select, button, input {
 }
 
 #station-select {
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #fff;
+  border-radius: 7px;
+  background: var(--c-slate);
+  color: var(--c-ash);
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  /* Custom dropdown caret in muted teal. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%236B9E78' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+#station-select:hover { background-color: #3D5B5F; }
+#station-select:focus {
+  outline: none;
+  border-color: var(--c-teal);
+  box-shadow: 0 0 0 3px rgba(107, 158, 120, 0.18);
 }
 
 .seg {
   display: flex;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
+  background: var(--c-slate);
 }
 
 .seg-btn {
   flex: 1;
-  padding: 7px 4px;
-  background: #fff;
+  padding: 8px 4px;
+  background: transparent;
   border: none;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-soft);
   cursor: pointer;
   font-size: 12px;
-  color: var(--muted);
-  transition: background 0.1s, color 0.1s;
+  color: var(--text-soft);
+  opacity: 0.7;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
 
 .seg-btn:last-child { border-right: none; }
-.seg-btn:hover { background: #f4f4f5; }
+.seg-btn:hover {
+  background: rgba(202, 210, 197, 0.06);
+  opacity: 1;
+}
 .seg-btn.active {
-  background: var(--text);
-  color: #fff;
-  font-weight: 500;
+  background: var(--c-teal);
+  color: var(--c-white);
+  font-weight: 600;
+  opacity: 1;
 }
 
 .check {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   font-size: 13px;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
-  color: var(--text);
+  color: var(--text-soft);
   cursor: pointer;
 }
 
@@ -122,18 +185,20 @@ select, button, input {
   width: 16px;
   height: 16px;
   cursor: pointer;
+  accent-color: var(--c-teal);  /* tints the native checkbox */
 }
 
 .legend {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .legend-bar {
   height: 10px;
-  border-radius: 2px;
-  border: 1px solid var(--border);
+  border-radius: 3px;
+  border: 1px solid var(--border-soft);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
 .legend-labels {
@@ -144,58 +209,166 @@ select, button, input {
   font-variant-numeric: tabular-nums;
 }
 
+/* Summary card — the focal element of the sidebar. Layered surface
+   (charcoal → slate gradient + subtle inner highlight + soft drop) so it
+   reads as a "tile" lifted off the panel. Numeric values are pill badges
+   to give the metrics a tactile, card-like feel — harmonized to the same
+   teal/ash palette as the rest of the UI. */
 .summary {
-  background: var(--bg);
+  background:
+    linear-gradient(170deg, rgba(107, 158, 120, 0.06) 0%, transparent 60%),
+    var(--panel-inset);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: 9px;
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.22);
+  position: relative;
+  overflow: hidden;
+}
+/* Decorative corner accent — tiny teal triangle in the upper-right.
+   Adds personality without competing with the data. */
+.summary::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 26px; height: 26px;
+  background: linear-gradient(225deg, var(--c-teal) 0%, transparent 60%);
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .summary .row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
   font-variant-numeric: tabular-nums;
 }
 
-.summary .row .k { color: var(--muted); }
-.summary .row .v { font-weight: 500; }
-
-.summary .top h3 {
-  margin: 6px 0 4px;
-  font-size: 11px;
+.summary .row .k {
+  color: var(--muted);
+  font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
   font-weight: 600;
+}
+
+/* Badge-style value pills. Default: subtle teal-tinted card. The value
+   pops as a discrete element rather than just text. */
+.summary .row .v {
+  display: inline-block;
+  padding: 4px 11px;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ash);
+  background: rgba(107, 158, 120, 0.10);
+  border: 1px solid rgba(107, 158, 120, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  letter-spacing: -0.005em;
+}
+/* Net positive: solid teal — this is the "headline" metric. */
+.summary .row .v.net-pos {
+  color: var(--c-white);
+  background: rgba(107, 158, 120, 0.28);
+  border-color: rgba(107, 158, 120, 0.55);
+}
+/* Net negative: muted brick. Reads "warning" without screaming. */
+.summary .row .v.net-neg {
+  color: #FCA5A5;
+  background: rgba(185, 28, 28, 0.18);
+  border-color: rgba(185, 28, 28, 0.40);
+}
+
+.summary .top h3 {
+  margin: 10px 0 7px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--c-teal);
+  font-weight: 700;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-soft);
 }
 
 .summary .top ol {
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
+  counter-reset: top-rank;
 }
 
 .summary .top li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+  counter-increment: top-rank;
+}
+/* Custom rank chip — small teal-bordered circle holding the position. */
+.summary .top li::before {
+  content: counter(top-rank);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: rgba(107, 158, 120, 0.12);
+  border: 1px solid rgba(107, 158, 120, 0.35);
+  color: var(--c-teal);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .summary .top li .v {
-  color: var(--muted);
-  margin-left: 4px;
+  margin-left: auto;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-teal);
+  background: rgba(107, 158, 120, 0.10);
+  border: 1px solid rgba(107, 158, 120, 0.22);
+  font-variant-numeric: tabular-nums;
 }
 
-.muted { color: var(--muted); font-size: 12px; margin: 0; }
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
 
 #sidebar footer {
   margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+}
+#sidebar footer .muted { color: var(--muted); font-size: 11px; }
+#sidebar footer a {
+  color: var(--c-ash);
+  opacity: 0.75;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(202, 210, 197, 0.3);
+  transition: color 0.15s, opacity 0.15s;
+}
+#sidebar footer a:hover {
+  color: var(--c-teal);
+  opacity: 1;
 }
 
 #map {
@@ -209,44 +382,82 @@ select, button, input {
 }
 #map.ready { opacity: 1; }
 
+/* Parcel hover popup — same dark theme as the sidebar so the two read as
+   one design system. Border tinted with the teal accent to feel related
+   to the active states in the panel. The popup tip (CSS triangle drawn
+   by MapLibre) is repainted to match. */
 .maplibregl-popup-content {
   font: inherit;
   font-size: 12px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 11px 13px 10px;
+  border-radius: 8px;
+  background: var(--c-charcoal);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 6px 22px rgba(0, 0, 0, 0.35);
+  min-width: 180px;
 }
 
+/* Recolor the popup tip arrows so they match the dark popup body. */
+.maplibregl-popup-tip { display: none; }  /* default white tip clashes; hide */
+
 .maplibregl-popup-content .pp-title {
-  font-weight: 600;
-  margin-bottom: 2px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--c-white);
+  margin-bottom: 3px;
+  letter-spacing: -0.005em;
 }
 
 .maplibregl-popup-content .pp-sub {
   color: var(--muted);
   font-size: 11px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
   font-variant-numeric: tabular-nums;
 }
 
 .maplibregl-popup-content .pp-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  align-items: baseline;
+  gap: 14px;
   font-variant-numeric: tabular-nums;
+  padding: 2px 0;
 }
 
-.maplibregl-popup-content .pp-row .k { color: var(--muted); }
+.maplibregl-popup-content .pp-row .k {
+  color: var(--muted);
+  font-size: 11px;
+}
+.maplibregl-popup-content .pp-row .v {
+  font-weight: 600;
+  color: var(--c-ash);
+}
+/* Highlight the leading numeric row (typically rev/ac or net/ac) so a
+   quick glance pulls the eye to the main value. */
+.maplibregl-popup-content .pp-row.primary .v {
+  color: var(--c-teal);
+  font-weight: 700;
+}
 
 /* Floating glass-panel station labels (HTML markers anchored to station
    coordinates, lifted via Marker offset and styled translucent so they
-   read like little plates hovering above the rail line). */
+   read like little plates hovering above the rail line). The train icon
+   sits to the left of the station name, separated by a small gap. */
 .station-floater {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: rgba(255, 255, 255, 0.6);
   -webkit-backdrop-filter: blur(8px) saturate(160%);
   backdrop-filter: blur(8px) saturate(160%);
   border: 1px solid rgba(14, 165, 233, 0.45);
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 4px 10px 4px 8px;
   font-size: 12px;
   font-weight: 600;
   color: #0c4a6e;
@@ -255,4 +466,54 @@ select, button, input {
   pointer-events: none;
   user-select: none;
   transform: translateZ(0);
+}
+.station-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0ea5e9;          /* train icon = saturated cyan, matches stations */
+  flex-shrink: 0;
+}
+.station-icon svg { display: block; }
+
+/* Floating area-name badges (suburbs / neighbourhoods like East Kapolei,
+   Pearl City, Aiea). Darker, more subdued styling than the cyan station
+   plates so they sit in the background as orientation aids without
+   competing for attention. */
+/* Area badges sit on top of the parcel viz — keep them legible without
+   blocking what's underneath. Heavy backdrop-filter blur + low background
+   opacity gives a frosted-glass effect that the polygon colors bleed
+   through. A text-shadow keeps the white type readable when the badge
+   happens to sit over a pale parcel. */
+/* Area badges sit on top of the parcel viz — keep them legible without
+   blocking what's underneath. The frost is now mostly carried by the
+   backdrop-filter blur (which compresses the visual noise behind the badge
+   so the text reads cleanly) plus a strong text-shadow; the actual fill is
+   barely there, letting polygon colors come through. */
+.area-badge {
+  background: rgba(15, 23, 42, 0.12);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 5px;
+  padding: 5px 13px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10);
+  pointer-events: none;
+  user-select: none;
+  transform: translateZ(0);
+}
+.area-badge.neighbourhood {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px 10px;
 }
