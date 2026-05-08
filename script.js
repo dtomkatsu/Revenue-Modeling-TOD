@@ -388,15 +388,6 @@ function bindHoverPopup() {
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
   let hoveredTmk = null;
   let lastPopupTmk = null;
-  // 3D fill-extrusion has tiny "gaps" in screen-space hit-testing between
-  // adjacent parcels of different heights — pixel-perfect cursor stays over
-  // a single parcel visually, but maplibre's queryRenderedFeatures returns
-  // empty for some pixel offsets, causing rapid mouseleave→mouseenter
-  // cycles that flip the hover state on/off (probe-confirmed: 5 leaves +
-  // 5 enters in 30 mousemoves of ±3 px jitter). Debounce the clear: if a
-  // mousemove arrives within LEAVE_GRACE_MS, cancel the pending unhover.
-  const LEAVE_GRACE_MS = 200;
-  let leaveTimer = null;
 
   const setHover = (tmk) => {
     if (hoveredTmk === tmk) return;
@@ -409,9 +400,7 @@ function bindHoverPopup() {
     }
   };
 
-  // Cheap polygon centroid (mean of first ring) — close enough for anchoring
-  // a popup. Polygons that are L-shaped will get a slightly off-center pin
-  // but nobody cares for parcel sizes at z14–17.
+  // Cheap polygon centroid (mean of first ring) — close enough for anchoring.
   const featureCentroid = (geom) => {
     const ring = geom.type === 'Polygon'
       ? geom.coordinates[0]
@@ -421,59 +410,72 @@ function bindHoverPopup() {
     return [cx / ring.length, cy / ring.length];
   };
 
-  const show = (e) => {
-    if (!e.features?.length) return;
-    if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
-    map.getCanvas().style.cursor = 'pointer';
-    // queryRenderedFeatures returns features whose *rendered pixels* are at
-    // the cursor — for fill-extrusion that includes side walls of nearby
-    // tall bars, so the candidate-set order can shuffle as the cursor moves
-    // even within the same parcel. Stabilize: keep the current hovered TMK
-    // if it's still among the candidates, only switch when it disappears.
-    let f = e.features[0];
+  const buildHTML = (p) => {
+    const addr = p.address && p.address !== 'null' ? p.address : null;
+    const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
+    return `
+      <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
+      ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
+      <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+      <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
+      <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
+      ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
+      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
+    `;
+  };
+
+  const clearHover = () => {
+    setHover(null);
+    lastPopupTmk = null;
+    popup.remove();
+    map.getCanvas().style.cursor = '';
+  };
+
+  // Single global mousemove (NOT layer-scoped). Layer-scoped mousemove
+  // misfires for fill-extrusion: pixel-perfect cursor stays visually on a
+  // parcel but maplibre returns empty queryRenderedFeatures between gap
+  // pixels of adjacent extrusions of different heights. We compensate
+  // with two mechanisms:
+  //   1. Generous bbox query (HOVER_BBOX_PX). With pitched 3D the rendered
+  //      top of a parcel can be a few px off from the cursor's exact pixel;
+  //      a small bbox absorbs that.
+  //   2. Sticky hover. If the previously-hovered TMK is still among the
+  //      candidates, keep it (don't shuffle to whatever happens to be
+  //      first in the result list — that flips frame-to-frame).
+  //   3. NO clearHover when query returns empty. Pitched 3D extrusions
+  //      project the ground centroid below the rendered top face, so the
+  //      cursor often lands on basemap pixels even though it's visually
+  //      on the parcel. Only clear when cursor crosses to a *different*
+  //      parcel candidate (or leaves the canvas, handled below).
+  const HOVER_BBOX_PX = 6;
+  map.on('mousemove', (e) => {
+    const features = map.queryRenderedFeatures(
+      [[e.point.x - HOVER_BBOX_PX, e.point.y - HOVER_BBOX_PX],
+       [e.point.x + HOVER_BBOX_PX, e.point.y + HOVER_BBOX_PX]],
+      { layers: ['parcels-extrude', 'parcels-fill'] }
+    );
+    if (!features.length) return;  // do not clear — gap pixels are expected
+    let f = features[0];
     if (hoveredTmk != null) {
-      const stick = e.features.find((c) => c.properties.tmk === hoveredTmk);
+      const stick = features.find((c) => c.properties.tmk === hoveredTmk);
       if (stick) f = stick;
     }
-    const p = f.properties;
-    const tmk = p.tmk ?? null;
+    const tmk = f.properties.tmk ?? null;
+    if (tmk === hoveredTmk) return;  // same parcel — nothing to update
     setHover(tmk);
-    // Anchor at parcel centroid (computed on TMK change). Following the
-    // cursor produced visible stutter — the popup snapped by 1–2 px every
-    // frame, reading as motion rather than a pinned label.
+    map.getCanvas().style.cursor = 'pointer';
     if (tmk !== lastPopupTmk) {
       popup.setLngLat(featureCentroid(f.geometry));
-      const addr = p.address && p.address !== 'null' ? p.address : null;
-      const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
-      const html = `
-        <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
-        ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
-        <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
-        <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
-        <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
-        ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
-        ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
-      `;
-      popup.setHTML(html);
+      popup.setHTML(buildHTML(f.properties));
       lastPopupTmk = tmk;
     }
     if (!popup.isOpen()) popup.addTo(map);
-  };
-  const hide = () => {
-    if (leaveTimer) return;  // already scheduled
-    leaveTimer = setTimeout(() => {
-      map.getCanvas().style.cursor = '';
-      setHover(null);
-      popup.remove();
-      lastPopupTmk = null;
-      leaveTimer = null;
-    }, LEAVE_GRACE_MS);
-  };
+  });
 
-  for (const id of ['parcels-fill', 'parcels-extrude']) {
-    map.on('mousemove', id, show);
-    map.on('mouseleave', id, hide);
-  }
+  // Cursor leaves the map canvas entirely (e.g., into the sidebar) — this is
+  // the only signal we trust to clear the popup, since gap-pixel mouseleaves
+  // can't be distinguished from real ones.
+  map.getCanvas().addEventListener('mouseleave', clearHover);
 }
 
 function wireUI() {
