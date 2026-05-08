@@ -58,17 +58,40 @@ Files cached to `data/raw/budget/`:
 | File | Pages used | Extracts |
 |---|---|---|
 | `operating_fy26.pdf` | 175 (Road Maintenance), Wastewater O&M section | `road_om_total_usd` ($48,070,770), `sewer_om_total_usd` ($188,675,341) |
-| `capital_fy26.pdf` | — | Cached for future CIP allocation; not used in v1 |
+| `capital_fy26.pdf` | 181, 185, 215, 219 (road CIP); 252, 370 (sewer CIP) | `road_cip_total_usd` ($123,324,333/yr, 6yr-avg), `sewer_cip_total_usd` ($787,481,666/yr, 6yr-avg) |
 
 Extraction is via pdfplumber's `extract_tables()` with hard-coded page hints
-and label regexes (see `etl/03_extract_budget_totals.py`). Manual override
-file: `data/budget_overrides.json` — any non-null value there wins over the
-PDF extraction.
+and label regexes (see `etl/03_extract_budget_totals.py` for O&M and
+`etl/03b_extract_cip_totals.py` for CIP). Manual override files:
+`data/budget_overrides.json` (O&M) and `data/cip_overrides.json` (CIP) —
+any non-null value there wins over the PDF extraction.
 
 **Water O&M is null** in v1: the Board of Water Supply is semi-autonomous and
 its O&M budget is not in the City Operating Budget PDF. The downstream cost
 computation handles null gracefully (water cost contributes NaN, road + sewer
 make up the total).
+
+**Water CIP is null** for the same reason — BWS publishes a separate
+Six-Year CIP that isn't in `capital_fy26.pdf`. Override via `cip_overrides.json`.
+
+**CIP annualization** — projects in `capital_fy26.pdf` are programmed
+across FY26–FY31 with substantial year-to-year lumpiness (e.g. Sand Island
+secondary treatment alone is $1.5B in FY28). To produce a representative
+annual cost-to-serve, CIP totals are annualized as
+`(Σ Total-6-Years) ÷ 6`. The FY26-only column is preserved in
+`cip_totals.json.provenance` for reference.
+
+**CIP categories** rolled up from `capital_fy26.pdf` Program Summary pages:
+
+| Category | Programs included |
+|---|---|
+| Road CIP | Highways, Streets And Roadways · Bridges, Viaducts And Grade Separation · Storm Drainage · Street Lighting |
+| Sewer CIP | Sewage Collection And Disposal · Improvement District-Sewers |
+| Water CIP | (BWS not in this PDF; supply via override) |
+
+Mass Transit (Skyline/TheBus) and Bikeways are excluded — Transit capital
+is a HART/DTS regional investment rather than parcel-level cost-to-serve;
+bikeways have no O&M counterpart in v1's budget extraction.
 
 ### 1.3 Geographic-only sources we considered but didn't fetch
 
@@ -89,12 +112,13 @@ script version.
 ```
 01_fetch_arcgis        → data/raw/*.geojson           (7 layers + RPAD CSVs via fix_revenue.py)
 02_fetch_budget_pdfs   → data/raw/budget/*.pdf
-03_extract_budget_totals → data/processed/budget_totals.json
+03_extract_budget_totals → data/processed/budget_totals.json    (O&M road/sewer/water)
+03b_extract_cip_totals → data/processed/cip_totals.json         (CIP road/sewer/water, 6yr-avg)
 04_build_walksheds     → data/processed/walksheds.geojson  (13 polygons, 1-mi buffer)
 05_join_parcels        → data/processed/parcels_in_walksheds.geojson
 06_compute_revenue     → data/processed/parcels_revenue.geojson  (rev_per_ac per parcel)
    (in v1, supplanted by fix_revenue.py — see §5)
-07_compute_frontage_costs → data/processed/parcels_costs.geojson  (cost_per_ac per parcel)
+07_compute_frontage_costs → data/processed/parcels_costs.geojson  (cost_om_per_ac, cip_per_ac, cost_per_ac per parcel)
 08_emit_frontend_data  → data/parcels_tod.geojson + data/stations.geojson  (committed)
 ```
 
@@ -225,18 +249,32 @@ infrastructure is allocated to the parcels adjacent to it, weighted by
 frontage length. Tall, narrow lots in dense areas end up with low cost-per-
 acre; sprawling parcels with long frontages end up with high cost-per-acre.
 
+The cost model has **two components**: annual operating (O&M) and annualized
+capital (CIP). They use the same frontage proration with separate per-foot
+rates, then sum to the parcel's `cost_per_ac`.
+
 ### 6.1 City-wide per-foot rates
 
 Computed once before the per-parcel loop:
 
+**Operating (O&M):**
 ```
-road_rate_$/ft  = 48,070,770 / 3,728,867 ft  ≈ $12.89/ft
-sewer_rate_$/ft = 188,675,341 / 3,728,867 ft ≈ $50.60/ft  (denominator = roads, see §6.4)
-water_rate_$/ft = null                                    (numerator missing, see §1.2)
+road_om_rate_$/ft  =  48,070,770 / 3,728,867 ft  ≈ $12.89/ft
+sewer_om_rate_$/ft = 188,675,341 / 3,728,867 ft  ≈ $50.60/ft  (denom = roads, see §6.4)
+water_om_rate_$/ft = null                                     (numerator missing, see §1.2)
 ```
 
-Numerators are FY26 O&M totals from the budget PDFs. Denominators are the
-sum of LineString lengths in the relevant ArcGIS layer, after filters.
+**Capital (CIP, annualized 6yr-avg):**
+```
+road_cip_rate_$/ft  = 123,324,333 / 3,728,867 ft ≈ $33.07/ft
+sewer_cip_rate_$/ft = 787,481,666 / 3,728,867 ft ≈ $211.19/ft  (denom = roads, see §6.4)
+water_cip_rate_$/ft = null                                     (numerator missing, see §1.2)
+```
+
+Numerators are FY26 O&M totals (from `operating_fy26.pdf`) and 6-year-average
+CIP totals (from `capital_fy26.pdf`'s Program Summary pages, divided by 6).
+Denominators are the sum of LineString lengths in the relevant ArcGIS
+layer, after filters.
 
 ### 6.2 Per-parcel frontage
 
@@ -247,8 +285,12 @@ for parcel in unique_parcels:
     road_ft  = sum(seg.intersection(p_buf).length for seg in road_index.query(p_buf))
     sewer_ft = sum(...)  # actually equals road_ft because we use the same network
     water_ft = sum(...)
-    cost_total = road_ft·road_rate + sewer_ft·sewer_rate + water_ft·water_rate
-    cost_per_ac = cost_total / area_ac
+    om_total  = road_ft·road_om_rate  + sewer_ft·sewer_om_rate  + water_ft·water_om_rate
+    cip_total = road_ft·road_cip_rate + sewer_ft·sewer_cip_rate + water_ft·water_cip_rate
+    cost_total = om_total + cip_total
+    cost_per_ac    = cost_total / area_ac    # ← what the frontend "Cost" mode shows
+    cost_om_per_ac = om_total   / area_ac    # exposed for popup breakdown
+    cip_per_ac     = cip_total  / area_ac    # exposed for popup breakdown
 ```
 
 We use a `shapely.strtree.STRtree` for the spatial indexes.
@@ -386,9 +428,13 @@ Listed in rough order of impact on the displayed numbers:
 4. **Water O&M = null** (§1.2) — entirely missing from cost. Real BWS
    FY26 O&M is on the order of $200M; that's roughly the same magnitude
    as sewer, so cost-per-acre is understated by roughly 30–40%.
-5. **Operating costs only, no capital replacement** (§9) — Urban3's
-   prism-height story typically also amortizes infrastructure CIP
-   liability, which is often 2–5x annual O&M.
+5. ~~Operating costs only, no capital replacement~~ — **closed in v1.1.**
+   CIP is annualized as 6-year-average and added on top of O&M; see §6.1.
+   Caveat: CIP is *attributed* via the same frontage proration as O&M,
+   which underweights capital projects whose footprint isn't linear (e.g.
+   treatment-plant upgrades). A more accurate model would split CIP
+   into linear (mains, roadway rehab) and point/area (treatment, pump
+   stations) and attribute each appropriately.
 6. **State roads filtered, but state-funded improvements not credited** —
    freeway interchanges generate land value but we don't see the parcels
    credited for that.
@@ -409,7 +455,7 @@ canonical comparison. Major deltas:
 | Aspect | Urban3 | This v1 |
 |---|---|---|
 | Revenue side | Property tax + GET + fees + transfers | Property tax only (flat-rate) |
-| Cost side | Operating + capital amortization | Operating only |
+| Cost side | Operating + capital amortization | Operating + capital (6yr-avg, frontage-prorated) |
 | Geographic scope | Whole city/county for context | TOD walksheds only |
 | Geographic baseline | Suburban parcels visible for contrast | Urban TOD only — no contrast |
 | Bivariate encoding | Yes (height = $/ac, color = net) | Yes (after refactor) |

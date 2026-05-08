@@ -2,7 +2,8 @@
 
 Interactive map of Honolulu's Skyline rail corridor showing per-parcel
 **revenue per acre** (property tax yield) vs. **infrastructure cost per acre**
-(frontage-prorated road / sewer / water O&M), inspired by
+(frontage-prorated road / sewer / water cost — annual O&M plus annualized
+6-year-average CIP), inspired by
 [Urban3's revenue-modeling methodology](https://www.urbanthree.com/services/revenue-modeling/).
 
 **v1 scope**: all 13 currently operating Skyline stations (Segments 1+2, west to east —
@@ -40,7 +41,9 @@ All public, no auth required:
   Board of Water Supply layers
 - **Honolulu FY26 Budget PDFs**
   ([Collection-15858](https://www4.honolulu.gov/docushare/dsweb/View/Collection-15858)) —
-  road / sewer / water Operating & Maintenance totals, extracted via pdfplumber
+  road / sewer / water Operating & Maintenance totals (`operating_fy26.pdf`)
+  and Capital Improvement Program totals (`capital_fy26.pdf`, annualized 6yr-avg),
+  extracted via pdfplumber
 
 See [METHODOLOGY.md](METHODOLOGY.md) for cost-allocation math, CRS choices, and
 caveats.
@@ -63,7 +66,8 @@ pipeline_run.py # orchestrator (runs steps 01–08; step 09 is manual)
 |---|---|---|---|
 | 01 | `etl/01_fetch_arcgis.py` | Download ArcGIS Hub layers | Yes |
 | 02 | `etl/02_fetch_budget_pdfs.py` | Download FY26 budget PDFs | Yes |
-| 03 | `etl/03_extract_budget_totals.py` | Extract O&M totals from PDFs | Yes |
+| 03 | `etl/03_extract_budget_totals.py` | Extract O&M totals from operating PDF | Yes |
+| 03b | `etl/03b_extract_cip_totals.py` | Extract CIP totals from capital PDF (6yr-avg) | Yes |
 | 04 | `etl/04_build_walksheds.py` | 0.5-mile station walksheds | Yes |
 | 05 | `etl/05_join_parcels.py` | Spatial join parcels → walksheds | Yes |
 | 06 | `etl/06_compute_revenue.py` | Property tax per acre | Yes |
