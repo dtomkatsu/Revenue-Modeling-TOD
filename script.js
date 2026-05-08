@@ -409,6 +409,18 @@ function bindHoverPopup() {
     }
   };
 
+  // Cheap polygon centroid (mean of first ring) — close enough for anchoring
+  // a popup. Polygons that are L-shaped will get a slightly off-center pin
+  // but nobody cares for parcel sizes at z14–17.
+  const featureCentroid = (geom) => {
+    const ring = geom.type === 'Polygon'
+      ? geom.coordinates[0]
+      : geom.coordinates[0][0];
+    let cx = 0, cy = 0;
+    for (const [x, y] of ring) { cx += x; cy += y; }
+    return [cx / ring.length, cy / ring.length];
+  };
+
   const show = (e) => {
     if (!e.features?.length) return;
     if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
@@ -426,8 +438,11 @@ function bindHoverPopup() {
     const p = f.properties;
     const tmk = p.tmk ?? null;
     setHover(tmk);
-    popup.setLngLat(e.lngLat);   // cheap — just CSS transform on the overlay
+    // Anchor at parcel centroid (computed on TMK change). Following the
+    // cursor produced visible stutter — the popup snapped by 1–2 px every
+    // frame, reading as motion rather than a pinned label.
     if (tmk !== lastPopupTmk) {
+      popup.setLngLat(featureCentroid(f.geometry));
       const addr = p.address && p.address !== 'null' ? p.address : null;
       const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
       const html = `
