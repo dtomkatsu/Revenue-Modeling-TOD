@@ -22,16 +22,16 @@
   </section>
 
   <section class="control">
-    <label>Metric</label>
+    <label>Metric <span class="year-badge year-badge--label">FY2026</span></label>
     <div class="seg" id="mode-toggle" role="radiogroup">
       <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true"
-        data-tooltip="Annual property tax revenue per acre. Assessed value × FY2026 millage rate by land-use class.">Revenue</button>
+        data-tooltip="The property tax this parcel pays the city each year, divided by its size in acres. Higher = more tax revenue per acre of land. (FY2026)">Revenue</button>
       <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false"
-        data-tooltip="Annual infrastructure O&amp;M cost per acre — share of road, sewer, and water budgets attributed by parcel frontage.">Cost</button>
+        data-tooltip="What it costs the city each year to maintain the roads, water, and sewer pipes serving this parcel, divided by its size in acres. (FY2026)">Cost</button>
       <button class="seg-btn" data-mode="net" role="radio" aria-checked="false"
-        data-tooltip="Revenue minus cost. Positive = the parcel pays more in tax than it costs the city to serve.">Net</button>
+        data-tooltip="Revenue minus cost. Green = the parcel pays for itself. Red = the city loses money serving it. (FY2026)">Net</button>
     </div>
-    <div class="seg-caption">all values per acre</div>
+    <div class="seg-caption" id="seg-caption">all values per acre</div>
   </section>
 
   <section class="control">

@@ -205,9 +205,55 @@ select, button, input {
 .seg-caption {
   font-size: 10.5px;
   text-align: center;
-  margin-top: 6px;
+  margin-top: 8px;
   color: var(--muted);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  padding: 0 4px;
+}
+.seg-caption strong {
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+/* Year badge — small chip used inline in section headers, popup heads, and
+   tooltip subs to anchor every dollar figure to a specific fiscal year so
+   the user knows what reporting period they're looking at. */
+.year-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-teal);
+  background: rgba(107, 158, 120, 0.12);
+  border: 1px solid rgba(107, 158, 120, 0.30);
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* When the badge sits next to a section LABEL it should not overpower the
+   label itself — slightly smaller, less weight. */
+.year-badge--label {
+  margin-left: 6px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 0px 6px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* In the dark glass popup, the badge needs higher contrast so it reads
+   against busy backgrounds. */
+.parcel-popup .year-badge,
+.parcel-tooltip .year-badge {
+  color: #8FB89A;
+  background: rgba(107, 158, 120, 0.18);
+  border-color: rgba(107, 158, 120, 0.40);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .check {

@@ -379,12 +379,20 @@ function addLayers() {
   }
 }
 
+// Reporting-year label used everywhere we surface dollar figures — keep
+// in one place so we can bump it to FY2027 in a single edit when the
+// budget + millage data refreshes.
+const FISCAL_YEAR = 'FY2026';
+const yearBadgeHTML = `<span class="year-badge">${FISCAL_YEAR}</span>`;
+
 function buildHTML(p) {
   const addr = p.address && p.address !== 'null' ? p.address : null;
   const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
+  const subBits = [];
+  if (p.tmk) subBits.push(`TMK ${escapeHTML(String(p.tmk))}`);
   return `
-    <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
-    ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
+    <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')} ${yearBadgeHTML}</div>
+    ${subBits.length ? `<div class="pp-sub">${subBits.join(' · ')}</div>` : ''}
     <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
     <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
     <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
@@ -429,7 +437,7 @@ function buildPopupHTML(p) {
     </div>
 
     <div class="parcel-popup__section">
-      <h3>Assessment</h3>
+      <h3>Assessment ${yearBadgeHTML}</h3>
       <div class="parcel-popup__row"><span class="k">Assessed value</span><span class="v">${fmtUSDk(+p.assessed_value)}</span></div>
       <div class="parcel-popup__row"><span class="k">Property tax</span><span class="v">${fmtUSDk(annualRev)}</span></div>
       <div class="parcel-popup__row"><span class="k">Infrastructure cost</span><span class="v">${fmtUSDk(annualCost)}</span></div>
@@ -437,7 +445,7 @@ function buildPopupHTML(p) {
     </div>
 
     <div class="parcel-popup__section">
-      <h3>Per acre</h3>
+      <h3>Per acre ${yearBadgeHTML}</h3>
       <div class="parcel-popup__row"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">Net / ac</span><span class="v${netPosClass(+p.net_per_ac)}">${fmtUSDk(+p.net_per_ac)}</span></div>
@@ -659,6 +667,20 @@ function wireUI() {
   });
 }
 
+// Replace the static "all values per acre" with a metric-specific
+// explanation so the panel itself tells the user what the active mode
+// actually shows. Keeps technical jargon out — plain English.
+const SEG_CAPTIONS = {
+  revenue: 'Annual <strong>property tax paid</strong> by the parcel, per acre.',
+  cost:    'Annual <strong>cost to the city</strong> for road, water, and sewer service, per acre.',
+  net:     '<strong>Revenue minus cost</strong>, per acre. Green pays for itself; red is a net loss.',
+};
+
+function updateSegCaption() {
+  const el = document.getElementById('seg-caption');
+  if (el) el.innerHTML = SEG_CAPTIONS[STATE.mode] || 'all values per acre';
+}
+
 function updateFilterUI() {
   const minAv = thresholdFor(STATE.minAssessed, STATE.assessedMax);
   const minTx = thresholdFor(STATE.minTax,      STATE.taxMax);
@@ -736,6 +758,7 @@ function refresh() {
   renderLegend();
   renderSummary();
   updateFilterUI();
+  updateSegCaption();
 }
 
 function computeDomain(features, key, symmetric) {
