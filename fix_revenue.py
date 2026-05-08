@@ -1,11 +1,19 @@
-"""Fix revenue: joins RPAD asmtgis to parcels_in_walksheds and computes
-rev_per_ac using class-specific FY2026 Honolulu millage rates.
+"""Fix revenue: joins RPAD assessment data to parcels_in_walksheds and
+computes rev_per_ac using class-specific FY2026 Honolulu millage rates.
 
 Tax class detection tries a list of candidate column names (including
-'taxratecode', the RPAD standard). Falls back to a flat rate if the class
-column is absent, printing a warning.
+'taxratecode', the RPAD standard) on data/raw/rpad/asmtgis.csv. If the
+column is missing or fully empty (asmtgis.csv ships taxratecode but it
+is NaN in every FY2026 row), we fall back to data/raw/rpad/asmtpitt.csv,
+which carries the same schema with the class field populated.
 
-Residential A tier 2 (tnettaxval > $1M) applies $11.40 on the excess.
+Per-TMK aggregation: a TMK that holds N condo units appears as N suffix
+rows in RPAD. We sum tnettaxval/buildingvalue/landvalue across the
+suffixes and take the modal taxratecode/ovrclass — keeping a single row
+per TMK is wrong for condos.
+
+ovrclass=11 = Residential A (verified by tnettaxval distribution).
+Residential A tier 2 ($11.40 on tnettaxval excess above $1M) is applied.
 
 Run from ~/repos/Revenue-Modeling-TOD/
 """
@@ -21,52 +29,66 @@ SQ_M_PER_AC = 4046.8564224
 UTM_4N  = 32604
 WGS84   = 4326
 
-PARCELS_IN = ROOT / "data/processed/parcels_in_walksheds.geojson"
-RPAD_PATH  = ROOT / "data/raw/rpad/asmtgis.csv"
-OUT_PATH   = ROOT / "data/processed/parcels_revenue.geojson"
+PARCELS_IN     = ROOT / "data/processed/parcels_in_walksheds.geojson"
+RPAD_PRIMARY   = ROOT / "data/raw/rpad/asmtgis.csv"
+RPAD_FALLBACK  = ROOT / "data/raw/rpad/asmtpitt.csv"
+OUT_PATH       = ROOT / "data/processed/parcels_revenue.geojson"
 
 # FY2026 Honolulu RPT rates $/1,000 net taxable value.
 # Source: City & County Honolulu FY2026 RPT ordinance.
-MILLAGE: dict[str, float] = {
-    # Single-letter RPAD tax rate codes
-    "a":    3.50,   # Residential (homeowner with exemption)
-    "aa":   4.50,   # Residential A (non-owner; tier-2 handled separately)
-    "b":   11.40,   # Apartment
-    "c":   12.40,   # Commercial
-    "d":   12.40,   # Industrial
-    "e":    5.70,   # Agricultural
-    "f":    5.70,   # Preservation
-    "g":   13.90,   # Hotel and Resort
-    "h":    9.85,   # Vacation Rental / Transient Accommodation Rental
-    "i":    9.35,   # Residential Investor
-    "j":    6.50,   # Bed and Breakfast
-    "x":    0.00,   # Exempt / Public Service
-    "p":    0.00,   # Public Service (alias)
-    # Text equivalents for asmtpitt-style class names
-    "residential":                3.50,
-    "residential a":              4.50,
-    "apartment":                 11.40,
-    "commercial":                12.40,
-    "industrial":                12.40,
-    "agricultural":               5.70,
-    "preservation":               5.70,
-    "hotel and resort":          13.90,
-    "hotel/resort":              13.90,
-    "vacation rental":            9.85,
-    "transient accommodations":   9.85,
-    "transient accommodations rental": 9.85,
-    "tar":                        9.85,
-    "bed and breakfast":          6.50,
-    "residential investor":       9.35,
-    "exempt":                     0.00,
-    "public service":             0.00,
+RATE = {
+    "Residential":              3.50,
+    "Residential A":            4.50,   # tier-1; tier-2 above $1M handled separately
+    "Apartment":               11.40,
+    "Commercial":              12.40,
+    "Industrial":              12.40,
+    "Agricultural":             5.70,
+    "Preservation":             5.70,
+    "Hotel and Resort":        13.90,
+    "Vacation Rental":          9.85,
+    "Bed and Breakfast Home":   6.50,
+    "Residential Investor":     9.35,
+    "Public Service":           0.00,
+}
+
+# RPAD numeric taxratecode -> human-readable class. Codes inferred from the
+# FY2026 asmtpitt distribution (1=Residential dominant ~297k; 7=Hotel/Resort
+# 8.6k; 3=Commercial 8.1k; 4=Industrial 6.5k; 5=Agricultural 4.4k;
+# 6=Preservation 1.9k; 9=Apartment 466; 0=Public Service 94; 22 unmapped).
+NUMERIC_CODE = {
+    "0":  "Public Service",
+    "1":  "Residential",
+    "3":  "Commercial",
+    "4":  "Industrial",
+    "5":  "Agricultural",
+    "6":  "Preservation",
+    "7":  "Hotel and Resort",
+    "9":  "Apartment",
+}
+
+# RPAD ovrclass overrides (only well-established mappings — others fall back
+# to the base taxratecode).
+#   ovrclass=11 → Residential A (median tnettaxval ~$1.27M, all base code 1)
+OVRCLASS_OVERRIDE = {
+    "11": "Residential A",
+}
+
+# Letter-code shim (kept for forward compatibility if RPAD ever reverts to
+# the older alpha codes).
+LETTER_CODE = {
+    "a":  "Residential",         "aa": "Residential A",
+    "b":  "Apartment",           "c":  "Commercial",
+    "d":  "Industrial",          "e":  "Agricultural",
+    "f":  "Preservation",        "g":  "Hotel and Resort",
+    "h":  "Vacation Rental",     "i":  "Residential Investor",
+    "j":  "Bed and Breakfast Home",
+    "x":  "Public Service",      "p":  "Public Service",
 }
 
 # Residential A tier-2 kicks in above this net taxable value
 RA_TIER2_THRESHOLD = 1_000_000.0
 RA_TIER2_RATE      = 11.40   # $/1k on the excess
 
-# Candidate column names (lowercased) to detect the tax class
 CLASS_CANDIDATES = (
     "taxratecode", "taxrateclass", "tax_rate_code", "tax_class",
     "taxclass", "property_class", "class_code", "land_use_class",
@@ -74,15 +96,8 @@ CLASS_CANDIDATES = (
     "struc_class", "property_type",
 )
 
-FALLBACK_MILLAGE = 4.50  # median residential-A rate if class unknown
-FALLBACK_NOTE    = ("No tax class column found in RPAD; used flat "
-                    f"${FALLBACK_MILLAGE}/1k (Residential A tier-1 fallback). "
-                    "Inspect RPAD columns and add the class field name to "
-                    "CLASS_CANDIDATES in fix_revenue.py.")
-
 
 def norm_code(v):
-    """Lowercase, strip punctuation and extra whitespace."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return None
     s = str(v).strip().lower()
@@ -103,16 +118,108 @@ def norm_tmk(v):
     return digits.zfill(8) if digits else None
 
 
-def compute_ra_tax(tnettaxval: pd.Series, class_code: pd.Series) -> pd.Series:
-    """Compute tax applying Residential-A tier-2 premium above $1M."""
-    base_rate = class_code.map(MILLAGE)
+def _to_num(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(
+        s.astype(str).str.replace(r"[\$,\s]", "", regex=True),
+        errors="coerce",
+    )
+
+
+def _modal(s: pd.Series):
+    s = s.dropna()
+    if s.empty:
+        return None
+    m = s.mode()
+    return m.iloc[0] if not m.empty else None
+
+
+def load_rpad_with_class():
+    """Return (DataFrame aggregated to one row per tmk, source_path,
+    raw_class_col_name). Falls through to asmtpitt.csv if asmtgis.csv lacks
+    the class column or it's all NaN."""
+    for path in (RPAD_PRIMARY, RPAD_FALLBACK):
+        if not path.exists():
+            print(f"[skip] {path} not found")
+            continue
+        print(f"[read] {path.relative_to(ROOT)}")
+        df = pd.read_csv(path, dtype=str, low_memory=False)
+        df.columns = [c.lstrip("﻿").strip() for c in df.columns]
+        if "taxyr" in df.columns:
+            df = df[df["taxyr"].astype(str).str.strip() == "2026"]
+        df["_tmk8"] = df["tmk"].map(norm_tmk)
+        df = df.dropna(subset=["_tmk8"])
+
+        cols_lower = {c.lower(): c for c in df.columns}
+        class_col = next(
+            (cols_lower[c] for c in CLASS_CANDIDATES if c in cols_lower),
+            None,
+        )
+        has_class = (
+            class_col is not None
+            and df[class_col].notna().any()
+        )
+        if not has_class:
+            print(f"  no populated class column on {path.name}; trying next source")
+            continue
+
+        print(f"  using class column: {class_col!r}")
+        agg_dict = {
+            "tnettaxval":    "sum",
+            "buildingvalue": "sum",
+            "landvalue":     "sum",
+            class_col:       _modal,
+        }
+        for c in ("buildingexemption", "landexemption"):
+            if c in df.columns:
+                agg_dict[c] = "sum"
+        if "ovrclass" in df.columns:
+            agg_dict["ovrclass"] = _modal
+
+        # Numeric coercion before sum
+        for num_col in ("tnettaxval", "buildingvalue", "landvalue",
+                        "buildingexemption", "landexemption"):
+            if num_col in df.columns:
+                df[num_col] = _to_num(df[num_col])
+
+        agg = df.groupby("_tmk8", as_index=False).agg(agg_dict)
+        print(f"  {len(agg)} aggregated TMK rows from {len(df)} suffix rows")
+        return agg, path, class_col
+
+    raise RuntimeError(
+        "Neither asmtgis.csv nor asmtpitt.csv had a populated class column."
+    )
+
+
+def code_to_class(code, ovrclass):
+    """Resolve final class label from numeric/letter code + ovrclass override."""
+    if ovrclass is not None and not (isinstance(ovrclass, float) and pd.isna(ovrclass)):
+        ovr = str(ovrclass).strip()
+        if ovr in OVRCLASS_OVERRIDE:
+            return OVRCLASS_OVERRIDE[ovr]
+    if code is None or (isinstance(code, float) and pd.isna(code)):
+        return None
+    raw = str(code).strip()
+    if raw in NUMERIC_CODE:
+        return NUMERIC_CODE[raw]
+    norm = norm_code(raw)
+    if norm and norm in LETTER_CODE:
+        return LETTER_CODE[norm]
+    if norm and norm.title() in RATE:
+        return norm.title()
+    return None
+
+
+def compute_tax(tnettaxval: pd.Series, land_use: pd.Series) -> pd.Series:
+    base_rate = land_use.map(RATE)
     tax = tnettaxval * base_rate / 1000.0
-    ra_mask = class_code.isin(["aa", "residential a"])
+    ra_mask = land_use == "Residential A"
     excess = (tnettaxval - RA_TIER2_THRESHOLD).clip(lower=0)
-    tax_tier2 = excess * (RA_TIER2_RATE - MILLAGE.get("aa", 4.50)) / 1000.0
+    tax_tier2 = excess * (RA_TIER2_RATE - RATE["Residential A"]) / 1000.0
     tax = tax + np.where(ra_mask, tax_tier2, 0.0)
     return tax
 
+
+# ---------------------------------------------------------------------------
 
 print("[read] parcels_in_walksheds.geojson")
 gdf = gpd.read_file(PARCELS_IN)
@@ -125,62 +232,27 @@ print("[area] reprojecting to UTM 4N for true acreage")
 gdf["area_ac"] = gdf.to_crs(UTM_4N).geometry.area / SQ_M_PER_AC
 gdf["_tmk8"]   = gdf["tmk"].map(norm_tmk)
 
-print("[read] RPAD asmtgis.csv")
-rpad = pd.read_csv(RPAD_PATH, dtype=str, low_memory=False)
-rpad.columns = [c.lstrip("﻿").strip() for c in rpad.columns]
-print(f"  RPAD columns ({len(rpad.columns)}): {list(rpad.columns)}")
+rpad_agg, rpad_source, class_col = load_rpad_with_class()
 
-# Filter to FY2026
-if "taxyr" in rpad.columns:
-    rpad = rpad[rpad["taxyr"].astype(str).str.strip() == "2026"]
+merged = gdf.merge(rpad_agg, on="_tmk8", how="left")
+n_matched = merged["tnettaxval"].notna().sum()
+print(f"[join] {n_matched}/{len(merged)} parcel rows matched RPAD")
 
-rpad["_tmk8"] = rpad["tmk"].map(norm_tmk)
-rpad = rpad.dropna(subset=["_tmk8"]).drop_duplicates("_tmk8", keep="last")
-print(f"  {len(rpad)} FY26 RPAD rows after dedup")
+# Resolve land-use label from raw code + ovrclass override
+ovrclass_series = merged["ovrclass"] if "ovrclass" in merged.columns else pd.Series(
+    [None] * len(merged), index=merged.index
+)
+land_use = pd.Series(
+    [code_to_class(c, o) for c, o in zip(merged[class_col], ovrclass_series)],
+    index=merged.index,
+)
+unknown_mask = merged[class_col].notna() & land_use.isna()
+if unknown_mask.any():
+    unknown_codes = merged.loc[unknown_mask, class_col].value_counts().head(10).to_dict()
+    print(f"[warn] {int(unknown_mask.sum())} rows with unmapped class code "
+          f"(top: {unknown_codes}) — treated as unclassified (rate=0)")
 
-# Auto-detect class column
-rpad_cols_lower = {c.lower(): c for c in rpad.columns}
-class_col = next((rpad_cols_lower[c] for c in CLASS_CANDIDATES
-                  if c in rpad_cols_lower), None)
-if class_col:
-    print(f"  Found tax class column: {class_col!r}")
-    unique_codes = rpad[class_col].dropna().unique()[:20]
-    print(f"  Unique class codes: {list(unique_codes)}")
-else:
-    print(f"[warn] {FALLBACK_NOTE}")
-
-# Select columns to merge
-keep_cols = ["_tmk8", "tnettaxval", "buildingvalue", "landvalue",
-             "buildingexemption", "landexemption"]
-if class_col:
-    keep_cols.append(class_col)
-keep_cols = [c for c in keep_cols if c in rpad.columns]
-rpad_sub = rpad[keep_cols].copy()
-
-merged = gdf.merge(rpad_sub, on="_tmk8", how="left")
-n_matched = merged["tnettaxval"].notna().sum() if "tnettaxval" in merged.columns else 0
-print(f"[join] {n_matched}/{len(merged)} rows matched RPAD")
-
-# Numeric value
-tnettaxval = pd.to_numeric(
-    merged["tnettaxval"].astype(str).str.replace(r"[\$,\s]", "", regex=True),
-    errors="coerce"
-) if "tnettaxval" in merged.columns else pd.Series(np.nan, index=merged.index)
-
-# Compute tax
-if class_col:
-    code_norm = merged[class_col].map(norm_code)
-    unmatched = code_norm[code_norm.notna() & ~code_norm.isin(MILLAGE)].unique()
-    if len(unmatched):
-        print(f"[warn] {len(unmatched)} class code(s) not in MILLAGE table: {list(unmatched)}")
-    annual_tax = compute_ra_tax(tnettaxval, code_norm)
-    method = f"class-specific millage via {class_col}"
-    land_use = code_norm.copy()
-else:
-    annual_tax = tnettaxval * FALLBACK_MILLAGE / 1000.0
-    method = f"flat {FALLBACK_MILLAGE}/1k (no class field)"
-    land_use = pd.Series(None, index=merged.index)
-
+annual_tax = compute_tax(merged["tnettaxval"].fillna(0), land_use)
 merged["annual_property_tax"] = annual_tax
 merged["rev_per_ac"] = np.where(
     merged["area_ac"] > 0,
@@ -188,10 +260,8 @@ merged["rev_per_ac"] = np.where(
     np.nan,
 )
 merged["assessed_value"] = (
-    pd.to_numeric(merged.get("buildingvalue", pd.Series(0, index=merged.index))
-                  .astype(str).str.replace(r"[\$,\s]", "", regex=True), errors="coerce").fillna(0)
-  + pd.to_numeric(merged.get("landvalue", pd.Series(0, index=merged.index))
-                  .astype(str).str.replace(r"[\$,\s]", "", regex=True), errors="coerce").fillna(0)
+    merged.get("buildingvalue", pd.Series(0, index=merged.index)).fillna(0)
+  + merged.get("landvalue",     pd.Series(0, index=merged.index)).fillna(0)
 )
 merged["land_use"] = land_use
 
@@ -200,11 +270,24 @@ keep = ["tmk", "STATION_ID", "STATION_NAME", "area_ac",
         "land_use", "geometry"]
 out = merged[[c for c in keep if c in merged.columns]].copy()
 
+method = (
+    f"class-specific millage via {class_col!r} from "
+    f"{rpad_source.relative_to(ROOT)} (ovrclass=11 -> Residential A)"
+)
 print(f"[stats] method={method}")
-print(f"  rev_per_ac: min={out['rev_per_ac'].min():.0f}  "
-      f"median={out['rev_per_ac'].median():.0f}  "
-      f"max={out['rev_per_ac'].max():.0f}  "
-      f"nulls={out['rev_per_ac'].isna().sum()}")
+print(
+    f"  rev_per_ac: min={out['rev_per_ac'].min():.0f}  "
+    f"median={out['rev_per_ac'].median():.0f}  "
+    f"max={out['rev_per_ac'].max():.0f}  "
+    f"nulls={out['rev_per_ac'].isna().sum()}"
+)
+
+print("[stats] land_use distribution:")
+lu_counts = out["land_use"].fillna("(unclassified)").value_counts()
+total = len(out)
+for label, n in lu_counts.items():
+    rate = RATE.get(label, "—")
+    print(f"  {label:<30} {n:>8}  ({100*n/total:5.1f}%)   rate=${rate}/1k")
 
 if OUT_PATH.exists():
     OUT_PATH.unlink()
@@ -214,15 +297,19 @@ import json
 from datetime import datetime, timezone
 manifest = {
     "output": OUT_PATH.name,
-    "source_url": str(RPAD_PATH),
+    "source_url": str(rpad_source),
     "row_count": len(out),
     "script": "fix_revenue.py",
     "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "method": method,
-    "class_field": class_col,
-    "fallback_millage": FALLBACK_MILLAGE if not class_col else None,
+    "class_field": "land_use",
+    "value_field": "assessed_value",
+    "raw_class_column": class_col,
+    "rates_per_1k": RATE,
     "ra_tier2_threshold_usd": RA_TIER2_THRESHOLD,
     "ra_tier2_rate": RA_TIER2_RATE,
+    "ovrclass_overrides": OVRCLASS_OVERRIDE,
+    "land_use_distribution": {k: int(v) for k, v in lu_counts.items()},
 }
 OUT_PATH.with_suffix(OUT_PATH.suffix + ".manifest.json").write_text(
     json.dumps(manifest, indent=2) + "\n"

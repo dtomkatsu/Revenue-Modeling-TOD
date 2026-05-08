@@ -3,9 +3,9 @@
   "source_url": "file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_revenue.geojson + file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_costs.geojson",
   "row_count": 25834,
   "script": "etl/08_emit_frontend_data.py",
-  "fetched_at": "2026-05-08T00:15:42+00:00",
+  "fetched_at": "2026-05-08T00:47:28+00:00",
   "value_field": "assessed_value",
-  "class_field": null,
+  "class_field": "land_use",
   "rows_unmatched_cost": 0,
   "crs": "EPSG:4326",
   "stations_represented": [
