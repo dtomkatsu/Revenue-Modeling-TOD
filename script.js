@@ -169,10 +169,9 @@ function addLayers() {
     },
   });
 
-  // Parcel extrusion (3D) — visible by default. fill-extrusion-opacity
-  // does not support feature-state, but fill-extrusion-color and
-  // fill-extrusion-height do — applyPaint() wraps both in a hover case so
-  // the hovered bar lights up cyan and grows 25% taller.
+  // Parcel extrusion (3D) — visible by default. fill-extrusion-opacity does
+  // not support feature-state, but fill-extrusion-color does — applyPaint()
+  // wraps the color in a hover case so the hovered bar lights up cyan.
   map.addLayer({
     id: 'parcels-extrude',
     type: 'fill-extrusion',
@@ -406,17 +405,10 @@ function applyPaint() {
     const MIN_HEIGHT_M  = 10;
     const scale = HEIGHT_PEAK_M / Math.sqrt(peak);
     // Clamp input to peak before sqrt so outliers never exceed HEIGHT_PEAK_M.
-    // fill-extrusion-height also supports feature-state — bump hovered bar
-    // 25% taller for an extra visual nudge in 3D.
-    const baseHeight = [
+    map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
       'max',
       MIN_HEIGHT_M,
       ['*', scale, ['sqrt', ['min', peak, ['abs', ['to-number', ['get', HEIGHT_KEY]]]]]],
-    ];
-    map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
-      'case', ['boolean', ['feature-state', 'hover'], false],
-      ['*', 1.25, baseHeight],
-      baseHeight,
     ]);
   } else {
     map.setPaintProperty('parcels-fill', 'fill-color', colorExpr);
