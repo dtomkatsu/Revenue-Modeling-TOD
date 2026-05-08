@@ -49,13 +49,36 @@ caveats.
 
 ```
 common/         # http client, ArcGIS REST client, manifest helpers
-etl/            # 01–08 numbered pipeline steps
+etl/            # 01–09 numbered pipeline steps
 data/           # raw/cache/processed are gitignored; final GeoJSONs committed
 index.html      # single-page MapLibre app
 script.js
 styles.css
-pipeline_run.py # orchestrator
+pipeline_run.py # orchestrator (runs steps 01–08; step 09 is manual)
 ```
+
+### ETL steps
+
+| Step | Script | Description | Auto-run? |
+|---|---|---|---|
+| 01 | `etl/01_fetch_arcgis.py` | Download ArcGIS Hub layers | Yes |
+| 02 | `etl/02_fetch_budget_pdfs.py` | Download FY26 budget PDFs | Yes |
+| 03 | `etl/03_extract_budget_totals.py` | Extract O&M totals from PDFs | Yes |
+| 04 | `etl/04_build_walksheds.py` | 0.5-mile station walksheds | Yes |
+| 05 | `etl/05_join_parcels.py` | Spatial join parcels → walksheds | Yes |
+| 06 | `etl/06_compute_revenue.py` | Property tax per acre | Yes |
+| 07 | `etl/07_compute_frontage_costs.py` | Infrastructure cost per acre | Yes |
+| 08 | `etl/08_emit_frontend_data.py` | Emit `data/parcels_tod.geojson` + `stations.geojson` | Yes |
+| 09 | `etl/09_build_basemap_tiles.py` | Build self-hosted Hawaii PMTiles basemap | **Manual / yearly** |
+
+Step 09 requires Java 21+ and takes 5–15 minutes. Run it manually:
+
+```bash
+python etl/09_build_basemap_tiles.py
+```
+
+The output (`data/honolulu_basemap.pmtiles`, ~22 MB) is committed to git.
+See [METHODOLOGY.md §11](METHODOLOGY.md#11-basemap) for details.
 
 ## Development
 

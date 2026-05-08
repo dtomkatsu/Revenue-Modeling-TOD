@@ -18,6 +18,7 @@ number on the map, this is the authoritative document.
 8. [Known approximations and limitations](#8-known-approximations-and-limitations)
 9. [Gaps vs. Urban3 reference](#9-gaps-vs-urban3-reference)
 10. [Reconciliation checks](#10-reconciliation-checks)
+11. [Basemap](#11-basemap)
 
 ---
 
@@ -441,6 +442,81 @@ v1.1 should add `tests/test_reconciliation.py`:
    pipeline output matches `± 5%`.
 4. **Manifest freshness** — `pipeline_run.py --check` confirms every
    `data/processed/*.manifest.json` exists and is recent.
+
+---
+
+## 11. Basemap
+
+### 11.1 Source
+
+The vector basemap is built from the [Geofabrik](https://download.geofabrik.de/)
+daily Hawaii OSM extract:
+
+```
+https://download.geofabrik.de/north-america/us/hawaii-latest.osm.pbf
+```
+
+OSM snapshot date (from PBF header): see `data/honolulu_basemap.pmtiles.manifest.json`.
+
+### 11.2 Build tool
+
+[Planetiler](https://github.com/onthegomap/planetiler) v0.10.2. Produces
+a single `data/honolulu_basemap.pmtiles` file (~22 MB) using the
+[OpenMapTiles schema](https://openmaptiles.org/schema/) at zoom levels 0–14.
+
+Requires Java 21+. macOS: `brew install openjdk@21`. Script:
+
+```bash
+python etl/09_build_basemap_tiles.py
+# optional: --force to rebuild, --bbox=MINLON,MINLAT,MAXLON,MAXLAT to clip
+```
+
+Build time: ~5–15 minutes on a Mac mini (M-series). The JAR (~93 MB) is cached
+in `data/cache/` (gitignored). The PBF (~24 MB) is cached in `data/raw/osm/`
+(gitignored). Step 09 is **not** included in the default `pipeline_run.py`
+run because of the Java dependency and build time; rebuild manually (yearly or
+on demand).
+
+### 11.3 Serving
+
+The pmtiles file is committed to git and served directly by GitHub Pages.
+The frontend reads it via the
+[`pmtiles` JS v3.0.7](https://github.com/protomaps/PMTiles) protocol shim
+registered with MapLibre GL JS:
+
+```js
+const _pmProtocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', _pmProtocol.tile);
+```
+
+The style (`data/basemap_style.json`) points at
+`pmtiles://./data/honolulu_basemap.pmtiles`. The browser caches tiles
+natively via HTTP Range requests — no tile server, no prewarming needed.
+
+### 11.4 Style
+
+Forked from [OpenFreeMap](https://openfreemap.org/) Positron
+(`tiles.openfreemap.org/styles/positron`, fetched 2026-05-07). Only change:
+the `openmaptiles` source URL replaced with the local PMTiles path. Layer
+names follow the OpenMapTiles schema so the `style.load` recolor handler
+in `script.js` (water → soft blue, POI labels suppressed) continues to work.
+
+Glyphs and sprites still point at `tiles.openfreemap.org` — these are the
+remaining CDN dependency. Offline mode will break label rendering but not
+polygon rendering.
+
+### 11.5 Why self-host
+
+- **No CDN lag** — with a CDN-hosted vector basemap, first pan/zoom triggers
+  a network round-trip per tile. With PMTiles, the browser's HTTP cache warms
+  after the initial full-file fetch; subsequent pans read from cache.
+- **Future overlays** — future versions will repaint road colors, add
+  isochrones, and visualize GTFS bus routes. All of these require owning
+  the basemap layers (you can't restyle a raster or a CDN-opaque vector
+  source).
+- **OpenMapTiles schema** — Planetiler's output preserves layer names (`water`,
+  `road`, `poi`, `building`, etc.) that the existing `script.js` style
+  handler already targets.
 
 ---
 

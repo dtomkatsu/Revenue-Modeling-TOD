@@ -201,7 +201,13 @@ select, button, input {
 #map {
   flex: 1;
   height: 100vh;
+  /* Hidden while prewarmOahuTiles() camera-tours zoom levels in the
+     background. WebGL canvas keeps tessellating tiles into the cache;
+     only the visual composite is suppressed. Revealed via .ready class. */
+  opacity: 0;
+  transition: opacity 0.45s ease-in;
 }
+#map.ready { opacity: 1; }
 
 .maplibregl-popup-content {
   font: inherit;
@@ -230,3 +236,23 @@ select, button, input {
 }
 
 .maplibregl-popup-content .pp-row .k { color: var(--muted); }
+
+/* Floating glass-panel station labels (HTML markers anchored to station
+   coordinates, lifted via Marker offset and styled translucent so they
+   read like little plates hovering above the rail line). */
+.station-floater {
+  background: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  backdrop-filter: blur(8px) saturate(160%);
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0c4a6e;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+  pointer-events: none;
+  user-select: none;
+  transform: translateZ(0);
+}

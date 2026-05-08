@@ -53,28 +53,45 @@ const fmtUSDk = (n) => {
 };
 const fmtInt = new Intl.NumberFormat('en-US');
 
+// Register the pmtiles:// protocol so MapLibre can fetch tile ranges out of
+// our self-hosted single-file Hawaii basemap (data/honolulu_basemap.pmtiles).
+// Must run BEFORE `new maplibregl.Map()` constructs the source.
+const _pmProtocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', _pmProtocol.tile);
+
 const map = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    sources: {
-      'carto-positron': {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-          'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-          'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-        ],
-        tileSize: 256,
-        attribution: '© OpenStreetMap contributors © CARTO',
-      },
-    },
-    layers: [{ id: 'carto-positron', type: 'raster', source: 'carto-positron' }],
-  },
+  // Self-hosted OpenMapTiles-schema basemap, forked from openfreemap positron.
+  // Style file lives in data/, points its 'openmaptiles' source at our
+  // local .pmtiles via the pmtiles:// protocol.
+  style: 'data/basemap_style.json',
+  customAttribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   center: [-157.95, 21.38],
   zoom: 11,
   pitch: 0,
   bearing: 0,
+  // Cache enough tiles to hold all of Oahu z8–z11 (prewarmed) plus the
+  // user's z14–z15 working views. Default (~64 tiles) evicts the prewarm.
+  maxTileCacheSize: 1024,
+  maxTileCacheZoomLevels: 8,
+});
+
+// Once the vector style finishes loading, recolor the ocean and hide POI/
+// transit clutter so our parcel bars stay the focal point.
+map.on('style.load', () => {
+  // Soft Pacific blue. The OpenMapTiles schema names this layer 'water'.
+  if (map.getLayer('water')) {
+    map.setPaintProperty('water', 'fill-color', '#a8d5e2');
+  }
+  // Hide layers that compete with our parcel viz.
+  const hideIfPresent = [
+    'poi', 'poi-housenumber', 'poi-non-essential',
+    'transit-station-label', 'transit_stop_label',
+    'place_other', 'place_village',
+  ];
+  for (const id of hideIfPresent) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+  }
 });
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -93,10 +110,18 @@ map.on('load', async () => {
     addLayers();
     wireUI();
     refresh();
-    // 3D is on by default — pitch and zoom in so bars are immediately visible.
-    if (STATE.extrude) {
-      map.easeTo({ pitch: 60, zoom: Math.max(map.getZoom(), 15), duration: 0 });
-    }
+    // Tessellate Oahu basemap tiles into the in-memory cache while the map
+    // is still hidden (opacity 0 in CSS). Camera moves between zooms are
+    // invisible to the user; only the cache fills.
+    await prewarmOahuTiles();
+    // 3D is on by default — pose the final view and reveal the map.
+    map.jumpTo({
+      center: [-157.95, 21.38],
+      zoom: 15,
+      pitch: 60,
+      bearing: 0,
+    });
+    document.getElementById('map').classList.add('ready');
   } catch (err) {
     console.error(err);
     document.getElementById('summary').innerHTML =
@@ -110,6 +135,34 @@ async function fetchJSON(url) {
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
   return r.json();
 }
+
+// Walk the camera over Oahu at z8–z11 so MapLibre tessellates the lower-zoom
+// tiles into its in-memory cache before the user can ask for them. Runs while
+// the map element is hidden (opacity 0 via CSS), so the user never sees the
+// camera moves — only the final pitched z15 view appears once we add .ready.
+//
+// jumpTo() loads only the *current viewport* of tiles, so at z10/z11 (where
+// Oahu is wider than one viewport) we sweep multiple centers to cover it.
+async function prewarmOahuTiles() {
+  const sweeps = [
+    { zoom:  8, centers: [[-157.95, 21.45]] },
+    { zoom:  9, centers: [[-157.95, 21.45]] },
+    { zoom: 10, centers: [[-157.95, 21.65], [-157.95, 21.30]] },
+    { zoom: 11, centers: [
+      [-158.15, 21.65], [-157.95, 21.65], [-157.75, 21.65],
+      [-158.15, 21.30], [-157.95, 21.30], [-157.75, 21.30],
+    ] },
+  ];
+  for (const { zoom, centers } of sweeps) {
+    for (const center of centers) {
+      map.jumpTo({ center, zoom, pitch: 0, bearing: 0 });
+      while (!map.areTilesLoaded()) {
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    }
+  }
+}
+
 
 function getStationId(f) {
   return f.properties?.station_id ?? f.properties?.id ?? f.id;
@@ -200,7 +253,7 @@ function addLayers() {
     },
   });
 
-  // Station points.
+  // Station points (cyan dot at ground level — the "pin" beneath the label).
   map.addLayer({
     id: 'stations-circle',
     type: 'circle',
@@ -213,23 +266,17 @@ function addLayers() {
     },
   });
 
-  map.addLayer({
-    id: 'stations-label',
-    type: 'symbol',
-    source: 'stations',
-    layout: {
-      'text-field': ['coalesce', ['get', 'name'], ['get', 'station_name'], ''],
-      'text-size': 11,
-      'text-offset': [0, 1.1],
-      'text-anchor': 'top',
-      'text-allow-overlap': false,
-    },
-    paint: {
-      'text-color': '#0c4a6e',
-      'text-halo-color': '#fff',
-      'text-halo-width': 1.5,
-    },
-  });
+  // Floating glass-panel station labels — HTML markers (not symbol layer)
+  // because symbol layers have no Z-axis. The negative pixel offset lifts
+  // the label above the cyan dot, giving a "floating" look in 3D.
+  for (const f of STATE.stations.features) {
+    const el = document.createElement('div');
+    el.className = 'station-floater';
+    el.textContent = getStationName(f);
+    new maplibregl.Marker({ element: el, offset: [0, -32], anchor: 'bottom' })
+      .setLngLat(f.geometry.coordinates)
+      .addTo(map);
+  }
 
   bindHoverPopup();
 }
