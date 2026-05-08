@@ -135,7 +135,10 @@ def _build_planetiler_cmd(
         f"--osm_path={osm}",
         f"--output={output}",
         "--force",  # planetiler refuses to overwrite by default
-        "--download=false",
+        # OpenMapTiles needs auxiliary sources (lake_centerlines,
+        # water_polygons, natural_earth). Let Planetiler fetch any that
+        # aren't already cached under data/sources/.
+        "--download",
     ]
     if bbox:
         # Planetiler's --bounds takes minlon,minlat,maxlon,maxlat

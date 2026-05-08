@@ -13,3 +13,6 @@ __pycache__/
 data/raw/
 data/cache/
 data/processed/
+# Planetiler auxiliary downloads + tile weights (rebuildable, ~1.3 GB)
+data/sources/
+data/tile_weights.tsv.gz
