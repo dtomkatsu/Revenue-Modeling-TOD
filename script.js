@@ -431,54 +431,45 @@ function bindHoverPopup() {
     map.getCanvas().style.cursor = '';
   };
 
-  // Single global mousemove (NOT layer-scoped). Layer-scoped mousemove
-  // misfires for fill-extrusion: pixel-perfect cursor stays visually on a
-  // parcel but maplibre returns empty queryRenderedFeatures between gap
-  // pixels of adjacent extrusions of different heights. We compensate
-  // with two mechanisms:
-  //   1. Large bbox query (HOVER_BBOX_PX). MapLibre's queryRenderedFeatures
-  //      for fill-extrusion uses the GROUND polygon as the hit shape, not
-  //      the rendered top face — in pitched 3D the rendered bar is offset
-  //      tens of pixels from where the ground polygon projects to. Without
-  //      a wide bbox, most cursor positions on the visible bar return
-  //      empty. 40 px catches the bar shift across all reasonable extrusion
-  //      heights without grabbing too many neighbors.
-  //   2. Sticky hover. If the previously-hovered TMK is still among the
-  //      candidates, keep it (don't shuffle to whatever happens to be
-  //      first in the result list — that flips frame-to-frame).
-  //   3. NO clearHover when query returns empty. Pitched 3D extrusions
-  //      project the ground centroid below the rendered top face, so the
-  //      cursor often lands on basemap pixels even though it's visually
-  //      on the parcel. Only clear when cursor crosses to a *different*
-  //      parcel candidate (or leaves the canvas, handled below).
-  const HOVER_BBOX_PX = 40;
-  map.on('mousemove', (e) => {
-    const features = map.queryRenderedFeatures(
-      [[e.point.x - HOVER_BBOX_PX, e.point.y - HOVER_BBOX_PX],
-       [e.point.x + HOVER_BBOX_PX, e.point.y + HOVER_BBOX_PX]],
-      { layers: ['parcels-extrude', 'parcels-fill'] }
-    );
-    if (!features.length) return;  // do not clear — gap pixels are expected
-    let f = features[0];
-    if (hoveredTmk != null) {
-      const stick = features.find((c) => c.properties.tmk === hoveredTmk);
-      if (stick) f = stick;
-    }
-    const tmk = f.properties.tmk ?? null;
-    if (tmk === hoveredTmk) return;  // same parcel — nothing to update
-    setHover(tmk);
-    map.getCanvas().style.cursor = 'pointer';
-    if (tmk !== lastPopupTmk) {
-      popup.setLngLat(featureCentroid(f.geometry));
-      popup.setHTML(buildHTML(f.properties));
-      lastPopupTmk = tmk;
-    }
-    if (!popup.isOpen()) popup.addTo(map);
-  });
+  // Layer-scoped mousemove: maplibre's internal hit-testing for fill-
+  // extrusion correctly handles the rendered top face in pitched 3D, so
+  // this fires when the cursor is visually on a parcel bar — much better
+  // hover-area coverage than queryRenderedFeatures with a bbox.
+  //
+  // The original problem with this approach was flicker: pixel-level
+  // gaps in fill-extrusion rendering caused rapid mouseenter/mouseleave
+  // cycles that toggled hover off/on. Fix here: don't tie the hover
+  // CLEAR to mouseleave at all. Hover only clears when the cursor:
+  //   1. enters a *different* parcel (mousemove with a new TMK), or
+  //   2. leaves the canvas entirely (handled below)
+  // Trade-off: hover/popup persists even when cursor moves to a large
+  // basemap area (e.g., ocean). Acceptable — the user sees a clear
+  // visual cue (cyan-highlighted parcel) and can dismiss by hovering
+  // any other parcel or moving cursor off the map.
+  for (const id of ['parcels-fill', 'parcels-extrude']) {
+    map.on('mousemove', id, (e) => {
+      if (!e.features?.length) return;
+      let f = e.features[0];
+      if (hoveredTmk != null) {
+        const stick = e.features.find((c) => c.properties.tmk === hoveredTmk);
+        if (stick) f = stick;
+      }
+      const tmk = f.properties.tmk ?? null;
+      if (tmk === hoveredTmk) return;
+      setHover(tmk);
+      map.getCanvas().style.cursor = 'pointer';
+      if (tmk !== lastPopupTmk) {
+        popup.setLngLat(featureCentroid(f.geometry));
+        popup.setHTML(buildHTML(f.properties));
+        lastPopupTmk = tmk;
+      }
+      if (!popup.isOpen()) popup.addTo(map);
+    });
+  }
 
-  // Cursor leaves the map canvas entirely (e.g., into the sidebar) — this is
-  // the only signal we trust to clear the popup, since gap-pixel mouseleaves
-  // can't be distinguished from real ones.
+  // Cursor leaves the map canvas entirely (e.g., into the sidebar). This is
+  // the *only* signal we trust to clear hover/popup — gap-pixel mouseleaves
+  // on the parcel layer can't be distinguished from genuine exits.
   map.getCanvas().addEventListener('mouseleave', clearHover);
 }
 
