@@ -169,9 +169,10 @@ function addLayers() {
     },
   });
 
-  // Parcel extrusion (3D) — visible by default. Note: fill-extrusion-opacity
-  // does not support feature-state, so hover feedback in 3D is via the
-  // parcels-hover-outline layer below instead.
+  // Parcel extrusion (3D) — visible by default. fill-extrusion-opacity
+  // does not support feature-state, but fill-extrusion-color and
+  // fill-extrusion-height do — applyPaint() wraps both in a hover case so
+  // the hovered bar lights up cyan and grows 25% taller.
   map.addLayer({
     id: 'parcels-extrude',
     type: 'fill-extrusion',
@@ -185,8 +186,8 @@ function addLayers() {
     },
   });
 
-  // Hover outline (3D mode) — drawn as a line on top so the highlighted
-  // parcel reads even with the bar color.
+  // Ground-level outline of the hovered parcel — visible in both 2D and 3D
+  // (in 3D it shows up as a ring at the base of the lit-up bar).
   map.addLayer({
     id: 'parcels-hover-outline',
     type: 'line',
@@ -391,7 +392,11 @@ function applyPaint() {
     ...rampStops(lo, hi, palette)];
 
   if (STATE.extrude) {
-    map.setPaintProperty('parcels-extrude', 'fill-extrusion-color', colorExpr);
+    // fill-extrusion-color supports feature-state — swap to cyan on hover so
+    // the lit-up bar reads even when looking down the corridor in 3D.
+    map.setPaintProperty('parcels-extrude', 'fill-extrusion-color', [
+      'case', ['boolean', ['feature-state', 'hover'], false], '#0ea5e9', colorExpr,
+    ]);
     // Height is always revenue/ac (Urban3 convention: tall = productive).
     // Sqrt scaling against the 98th-percentile peak so low-revenue parcels
     // still have visible bars; 10m floor so non-zero values register at z14.
@@ -401,10 +406,17 @@ function applyPaint() {
     const MIN_HEIGHT_M  = 10;
     const scale = HEIGHT_PEAK_M / Math.sqrt(peak);
     // Clamp input to peak before sqrt so outliers never exceed HEIGHT_PEAK_M.
-    map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
+    // fill-extrusion-height also supports feature-state — bump hovered bar
+    // 25% taller for an extra visual nudge in 3D.
+    const baseHeight = [
       'max',
       MIN_HEIGHT_M,
       ['*', scale, ['sqrt', ['min', peak, ['abs', ['to-number', ['get', HEIGHT_KEY]]]]]],
+    ];
+    map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
+      'case', ['boolean', ['feature-state', 'hover'], false],
+      ['*', 1.25, baseHeight],
+      baseHeight,
     ]);
   } else {
     map.setPaintProperty('parcels-fill', 'fill-color', colorExpr);
