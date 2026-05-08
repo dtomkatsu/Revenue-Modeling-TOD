@@ -467,10 +467,13 @@ function bindHoverPopup() {
     });
   }
 
-  // Cursor leaves the map canvas entirely (e.g., into the sidebar). This is
-  // the *only* signal we trust to clear hover/popup — gap-pixel mouseleaves
-  // on the parcel layer can't be distinguished from genuine exits.
-  map.getCanvas().addEventListener('mouseleave', clearHover);
+  // Cursor leaves the map area entirely (e.g., into the sidebar). Bound to
+  // the outer container, NOT the canvas: the canvas is a sibling of popups
+  // and markers, so cursor moving onto the popup fires canvas.mouseleave
+  // → clearHover → popup vanishes → mouse over canvas → re-add popup →
+  // infinite flicker. The container wraps canvas + popup + markers, so
+  // mouseleave on it only fires on a genuine map exit.
+  map.getContainer().addEventListener('mouseleave', clearHover);
 }
 
 function wireUI() {
