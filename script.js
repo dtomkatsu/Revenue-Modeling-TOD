@@ -29,13 +29,18 @@ const METRIC_LABELS = {
 
 const STATE = {
   mode: 'revenue',
-  extrude: false,
+  extrude: true,
   stationId: '',
   parcels: null,        // raw FeatureCollection
   stations: null,
   filtered: [],         // currently visible parcel features
-  domain: [0, 1],       // [min, max] of current metric across visible parcels
+  domain: [0, 1],       // [min, max] of color metric (98th-pct clipped)
+  heightDomain: [0, 1], // [min, max] of rev_per_ac across visible parcels
 };
+
+// Height is ALWAYS revenue per acre (Urban3 convention: bar height = parcel
+// productivity, color = whatever the user wants to see — net is the iconic view).
+const HEIGHT_KEY = 'rev_per_ac';
 
 const fmtUSD0 = new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', maximumFractionDigits: 0,
@@ -88,6 +93,10 @@ map.on('load', async () => {
     addLayers();
     wireUI();
     refresh();
+    // 3D is on by default — pitch and zoom in so bars are immediately visible.
+    if (STATE.extrude) {
+      map.easeTo({ pitch: 60, zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    }
   } catch (err) {
     console.error(err);
     document.getElementById('summary').innerHTML =
@@ -126,24 +135,42 @@ function addLayers() {
   map.addSource('parcels', { type: 'geojson', data: STATE.parcels, promoteId: 'tmk' });
   map.addSource('stations', { type: 'geojson', data: STATE.stations });
 
-  // Parcel fill (2D).
+  // Parcel fill (2D) — hidden by default since 3D is on.
   map.addLayer({
     id: 'parcels-fill',
     type: 'fill',
     source: 'parcels',
+    layout: { visibility: STATE.extrude ? 'none' : 'visible' },
     paint: {
       'fill-color': '#cccccc',
-      'fill-opacity': 0.75,
-      'fill-outline-color': 'rgba(0,0,0,0.25)',
+      'fill-opacity': 0.85,
     },
   });
 
-  // Parcel extrusion (3D) — hidden by default.
+  // Parcel outline (separate layer so we can set stroke width).
+  map.addLayer({
+    id: 'parcels-outline',
+    type: 'line',
+    source: 'parcels',
+    layout: { visibility: STATE.extrude ? 'none' : 'visible' },
+    paint: {
+      'line-color': 'rgba(20,20,20,0.7)',
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        12, 0.3,
+        14, 0.7,
+        16, 1.2,
+        18, 1.8,
+      ],
+    },
+  });
+
+  // Parcel extrusion (3D) — visible by default.
   map.addLayer({
     id: 'parcels-extrude',
     type: 'fill-extrusion',
     source: 'parcels',
-    layout: { visibility: 'none' },
+    layout: { visibility: STATE.extrude ? 'visible' : 'none' },
     paint: {
       'fill-extrusion-color': '#cccccc',
       'fill-extrusion-opacity': 0.85,
@@ -231,10 +258,17 @@ function wireUI() {
 
   document.getElementById('extrude-toggle').addEventListener('change', (e) => {
     STATE.extrude = e.target.checked;
-    map.setLayoutProperty('parcels-fill', 'visibility', STATE.extrude ? 'none' : 'visible');
+    map.setLayoutProperty('parcels-fill',    'visibility', STATE.extrude ? 'none' : 'visible');
+    map.setLayoutProperty('parcels-outline', 'visibility', STATE.extrude ? 'none' : 'visible');
     map.setLayoutProperty('parcels-extrude', 'visibility', STATE.extrude ? 'visible' : 'none');
-    if (STATE.extrude && map.getPitch() < 30) {
-      map.easeTo({ pitch: 50, duration: 600 });
+    if (STATE.extrude) {
+      // 3D needs both pitch and zoom to be visible — pitch up to near max,
+      // zoom in enough that 30–1500m bars register as buildings.
+      const targetPitch = Math.max(map.getPitch(), 60);
+      const targetZoom  = Math.max(map.getZoom(), 15);
+      map.easeTo({ pitch: targetPitch, zoom: targetZoom, duration: 800 });
+    } else {
+      map.easeTo({ pitch: 0, duration: 600 });
     }
     refresh();
   });
@@ -271,13 +305,14 @@ function fitToStation() {
 }
 
 function refresh() {
-  const key = METRIC_KEYS[STATE.mode];
+  const colorKey = METRIC_KEYS[STATE.mode];
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
     if (STATE.stationId && String(f.properties?.station_id) !== STATE.stationId) return false;
-    return Number.isFinite(+f.properties?.[key]);
+    return Number.isFinite(+f.properties?.[colorKey]);
   });
 
-  STATE.domain = computeDomain(STATE.filtered, key, STATE.mode === 'net');
+  STATE.domain       = computeDomain(STATE.filtered, colorKey,    STATE.mode === 'net');
+  STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY,  false);
 
   applyPaint();
   renderLegend();
@@ -286,18 +321,27 @@ function refresh() {
 
 function computeDomain(features, key, symmetric) {
   if (!features.length) return symmetric ? [-1, 1] : [0, 1];
-  let min = Infinity, max = -Infinity;
+  // Percentile clipping so the ramp distributes across the bulk of the data
+  // instead of being collapsed by long-tail outliers (Honolulu RPAD has a few
+  // commercial parcels >100x the median).
+  const vals = [];
   for (const f of features) {
     const v = +f.properties[key];
-    if (v < min) min = v;
-    if (v > max) max = v;
+    if (Number.isFinite(v)) vals.push(v);
   }
+  if (!vals.length) return symmetric ? [-1, 1] : [0, 1];
+  vals.sort((a, b) => a - b);
+  const q = (p) => {
+    const i = Math.max(0, Math.min(vals.length - 1, Math.floor(p * (vals.length - 1))));
+    return vals[i];
+  };
+  let lo = q(0.02), hi = q(0.98);
   if (symmetric) {
-    const m = Math.max(Math.abs(min), Math.abs(max)) || 1;
+    const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
     return [-m, m];
   }
-  if (min === max) max = min + 1;
-  return [min, max];
+  if (lo === hi) hi = lo + 1;
+  return [lo, hi];
 }
 
 function applyPaint() {
@@ -309,8 +353,19 @@ function applyPaint() {
 
   if (STATE.extrude) {
     map.setPaintProperty('parcels-extrude', 'fill-extrusion-color', colorExpr);
+    // Height is always revenue/ac (Urban3 convention: tall = productive).
+    // Sqrt scaling against the 98th-percentile peak so low-revenue parcels
+    // still have visible bars; 10m floor so non-zero values register at z14.
+    const peak = Math.max(Math.abs(STATE.heightDomain[0]),
+                          Math.abs(STATE.heightDomain[1])) || 1;
+    const HEIGHT_PEAK_M = 500;
+    const MIN_HEIGHT_M  = 10;
+    const scale = HEIGHT_PEAK_M / Math.sqrt(peak);
+    // Clamp input to peak before sqrt so outliers never exceed HEIGHT_PEAK_M.
     map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
-      '/', ['abs', ['to-number', ['get', key]]], 10,
+      'max',
+      MIN_HEIGHT_M,
+      ['*', scale, ['sqrt', ['min', peak, ['abs', ['to-number', ['get', HEIGHT_KEY]]]]]],
     ]);
   } else {
     map.setPaintProperty('parcels-fill', 'fill-color', colorExpr);
@@ -332,10 +387,14 @@ function renderLegend() {
   const palette = STATE.mode === 'net' ? DIVERGING_RWG : VIRIDIS;
   const [lo, hi] = STATE.domain;
   const gradient = `linear-gradient(to right, ${palette.join(', ')})`;
+  const heightLine = STATE.extrude
+    ? `<div class="muted" style="font-size:10px;margin-top:6px;">Bar height: revenue / ac</div>`
+    : '';
   legend.innerHTML = `
-    <div class="legend-title muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">${METRIC_LABELS[STATE.mode]}</div>
+    <div class="legend-title muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">Color: ${METRIC_LABELS[STATE.mode]}</div>
     <div class="legend-bar" style="background:${gradient};"></div>
     <div class="legend-labels"><span>${fmtUSDk(lo)}</span>${STATE.mode === 'net' ? '<span>0</span>' : ''}<span>${fmtUSDk(hi)}</span></div>
+    ${heightLine}
   `;
 }
 
