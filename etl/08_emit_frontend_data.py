@@ -237,19 +237,37 @@ def emit_frontend(*, force: bool) -> int:
     merged["station_id"] = merged["STATION_ID"].astype(int)
     merged["net_per_ac"] = merged["rev_per_ac"] - merged["cost_per_ac"]
 
-    keep = [
-        "tmk", "station_id", "area_ac",
-        "rev_per_ac", "cost_per_ac", "net_per_ac",
+    # Dedupe by TMK. The spatial join in step 05 emits one row per (parcel,
+    # walkshed) pair — large parcels touching multiple stations end up
+    # duplicated. The frontend uses promoteId='tmk' for feature-state, so
+    # duplicates would all enter hover state at once and z-fight (visible
+    # flicker on cyan-on-hover). Collapse to one row per TMK with the set
+    # of station_ids preserved as an array; the frontend filter uses an
+    # 'in' membership test against that array.
+    parcel_props = [
+        "tmk", "area_ac", "rev_per_ac", "cost_per_ac", "net_per_ac",
         "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
         "assessed_value", "land_use", "address", "landlocked",
-        "geometry",
     ]
-    out_parcels = merged[keep].copy()
+    station_lists = (
+        merged.groupby("tmk")["station_id"]
+              .apply(lambda s: sorted(set(int(x) for x in s)))
+              .reset_index(name="station_ids")
+    )
+    n_before = len(merged)
+    deduped = merged.drop_duplicates(subset="tmk", keep="first")
+    deduped = deduped.merge(station_lists, on="tmk", how="left")
+    print(f"[dedup] {n_before} rows → {len(deduped)} unique tmks "
+          f"(-{n_before - len(deduped)} duplicates collapsed)")
+
+    keep = parcel_props + ["station_ids", "geometry"]
+    out_parcels = deduped[keep].copy()
 
     OUTPUT_PARCELS.parent.mkdir(parents=True, exist_ok=True)
     if OUTPUT_PARCELS.exists():
         OUTPUT_PARCELS.unlink()
     out_parcels.to_file(OUTPUT_PARCELS, driver="GeoJSON")
+    all_stations = sorted({sid for ids in out_parcels["station_ids"] for sid in ids})
     write_manifest(
         OUTPUT_PARCELS,
         source_url=f"file://{REVENUE_PATH} + file://{COSTS_PATH}",
@@ -260,7 +278,9 @@ def emit_frontend(*, force: bool) -> int:
             "class_field":          class_field,
             "rows_unmatched_cost":  n_unmatched,
             "crs":                  f"EPSG:{WGS84}",
-            "stations_represented": sorted(out_parcels["station_id"].unique().tolist()),
+            "stations_represented": all_stations,
+            "deduped_by_tmk":       True,
+            "rows_collapsed":       n_before - len(deduped),
         },
     )
     print(f"[done] {OUTPUT_PARCELS.relative_to(_ROOT)} ({len(out_parcels)} rows)")

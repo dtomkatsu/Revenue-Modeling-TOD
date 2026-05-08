@@ -60,7 +60,8 @@ const fmtInt = new Intl.NumberFormat('en-US');
 const _pmProtocol = new pmtiles.Protocol();
 maplibregl.addProtocol('pmtiles', _pmProtocol.tile);
 
-const map = new maplibregl.Map({
+// Expose for debugging probes (window.map is shadowed by the <map> element).
+const map = window._tod_map = new maplibregl.Map({
   container: 'map',
   // Self-hosted OpenMapTiles-schema basemap, forked from openfreemap positron.
   // Style file lives in data/, points its 'openmaptiles' source at our
@@ -245,7 +246,9 @@ function addLayers() {
     },
   });
 
-  // Parcel outline (separate layer so we can set stroke width).
+  // Parcel outline (separate layer so we can set stroke width). zoom must
+  // be at the top level of any zoom expression (per maplibre style spec) —
+  // wrap interpolate around case, not the other way around.
   map.addLayer({
     id: 'parcels-outline',
     type: 'line',
@@ -257,11 +260,14 @@ function addLayers() {
         '#0ea5e9', 'rgba(20,20,20,0.7)',
       ],
       'line-width': [
-        'case', ['boolean', ['feature-state', 'hover'], false],
-        3,
-        ['interpolate', ['linear'], ['zoom'],
-          12, 0.3, 14, 0.7, 16, 1.2, 18, 1.8],
+        'interpolate', ['linear'], ['zoom'],
+        12, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 0.3],
+        14, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 0.7],
+        16, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 1.2],
+        18, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 1.8],
       ],
+      'line-color-transition': { duration: 0 },
+      'line-width-transition': { duration: 0 },
     },
   });
 
@@ -275,6 +281,13 @@ function addLayers() {
     layout: { visibility: STATE.extrude ? 'visible' : 'none' },
     paint: {
       'fill-extrusion-color': '#cccccc',
+      // Disable the default 300ms color/opacity transitions. With a 'case'
+      // expression flipping between an interpolate color (non-hover) and a
+      // constant cyan (hover), MapLibre's intermediate-frame eval of the
+      // transition produces a visible flash on every cursor move. Issue
+      // ref: mapbox/mapbox-gl-js#6617. Instant swap = no flicker.
+      'fill-extrusion-color-transition':   { duration: 0 },
+      'fill-extrusion-opacity-transition': { duration: 0 },
       'fill-extrusion-opacity': 0.85,
       'fill-extrusion-height': 0,
       'fill-extrusion-base': 0,
@@ -308,7 +321,9 @@ function addLayers() {
   });
 
   // Ground-level outline of the hovered parcel — visible in both 2D and 3D
-  // (in 3D it shows up as a ring at the base of the lit-up bar).
+  // (in 3D it shows up as a ring at the base of the lit-up bar). Same
+  // expression-vs-constant issue (mapbox-gl-js#6617) as the extrude color:
+  // disable transition or the fade-in from 0→1 produces a visible flash.
   map.addLayer({
     id: 'parcels-hover-outline',
     type: 'line',
@@ -319,6 +334,7 @@ function addLayers() {
       'line-opacity': [
         'case', ['boolean', ['feature-state', 'hover'], false], 1, 0,
       ],
+      'line-opacity-transition': { duration: 0 },
     },
   });
 
@@ -371,6 +387,16 @@ function addLayers() {
 function bindHoverPopup() {
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
   let hoveredTmk = null;
+  let lastPopupTmk = null;
+  // 3D fill-extrusion has tiny "gaps" in screen-space hit-testing between
+  // adjacent parcels of different heights — pixel-perfect cursor stays over
+  // a single parcel visually, but maplibre's queryRenderedFeatures returns
+  // empty for some pixel offsets, causing rapid mouseleave→mouseenter
+  // cycles that flip the hover state on/off (probe-confirmed: 5 leaves +
+  // 5 enters in 30 mousemoves of ±3 px jitter). Debounce the clear: if a
+  // mousemove arrives within LEAVE_GRACE_MS, cancel the pending unhover.
+  const LEAVE_GRACE_MS = 200;
+  let leaveTimer = null;
 
   const setHover = (tmk) => {
     if (hoveredTmk === tmk) return;
@@ -385,28 +411,48 @@ function bindHoverPopup() {
 
   const show = (e) => {
     if (!e.features?.length) return;
+    if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
     map.getCanvas().style.cursor = 'pointer';
-    const f = e.features[0];
+    // queryRenderedFeatures returns features whose *rendered pixels* are at
+    // the cursor — for fill-extrusion that includes side walls of nearby
+    // tall bars, so the candidate-set order can shuffle as the cursor moves
+    // even within the same parcel. Stabilize: keep the current hovered TMK
+    // if it's still among the candidates, only switch when it disappears.
+    let f = e.features[0];
+    if (hoveredTmk != null) {
+      const stick = e.features.find((c) => c.properties.tmk === hoveredTmk);
+      if (stick) f = stick;
+    }
     const p = f.properties;
-    setHover(p.tmk ?? null);
-    const addr = p.address && p.address !== 'null' ? p.address : null;
-    // Highlight the row matching the active metric in teal (.primary).
-    const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
-    const html = `
-      <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
-      ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
-      <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
-      <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
-      <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
-      ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
-      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
-    `;
-    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+    const tmk = p.tmk ?? null;
+    setHover(tmk);
+    popup.setLngLat(e.lngLat);   // cheap — just CSS transform on the overlay
+    if (tmk !== lastPopupTmk) {
+      const addr = p.address && p.address !== 'null' ? p.address : null;
+      const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
+      const html = `
+        <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
+        ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
+        <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+        <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
+        <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
+        ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
+        ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
+      `;
+      popup.setHTML(html);
+      lastPopupTmk = tmk;
+    }
+    if (!popup.isOpen()) popup.addTo(map);
   };
   const hide = () => {
-    map.getCanvas().style.cursor = '';
-    setHover(null);
-    popup.remove();
+    if (leaveTimer) return;  // already scheduled
+    leaveTimer = setTimeout(() => {
+      map.getCanvas().style.cursor = '';
+      setHover(null);
+      popup.remove();
+      lastPopupTmk = null;
+      leaveTimer = null;
+    }, LEAVE_GRACE_MS);
   };
 
   for (const id of ['parcels-fill', 'parcels-extrude']) {
@@ -455,8 +501,11 @@ function selectStation(id) {
   const sel = document.getElementById('station-select');
   if (sel.value !== STATE.stationId) sel.value = STATE.stationId;
 
+  // Station filter: parcels carry a station_ids array (one entry per
+  // walkshed they fall in). 'in' tests membership of the selected station's
+  // numeric id within that array.
   const filter = STATE.stationId
-    ? ['==', ['to-string', ['get', 'station_id']], STATE.stationId]
+    ? ['in', ['to-number', STATE.stationId], ['get', 'station_ids']]
     : null;
   map.setFilter('parcels-fill', filter);
   map.setFilter('parcels-extrude', filter);
@@ -473,8 +522,9 @@ function fitToStation() {
     }
     return;
   }
+  const sid = +STATE.stationId;
   const matching = (STATE.parcels?.features || []).filter(
-    (f) => String(f.properties?.station_id) === STATE.stationId
+    (f) => (f.properties?.station_ids || []).includes(sid)
   );
   const b = bboxOf(matching);
   if (b) map.fitBounds(b, { padding: 60, duration: 600, maxZoom: 16 });
@@ -482,8 +532,10 @@ function fitToStation() {
 
 function refresh() {
   const colorKey = METRIC_KEYS[STATE.mode];
+  const filterSid = STATE.stationId ? +STATE.stationId : null;
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
-    if (STATE.stationId && String(f.properties?.station_id) !== STATE.stationId) return false;
+    if (filterSid !== null
+        && !(f.properties?.station_ids || []).includes(filterSid)) return false;
     return Number.isFinite(+f.properties?.[colorKey]);
   });
 

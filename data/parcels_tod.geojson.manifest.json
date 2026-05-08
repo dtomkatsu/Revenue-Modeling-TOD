@@ -1,7 +1,7 @@
 {
   "output": "parcels_tod.geojson",
   "source_url": "file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_revenue.geojson + file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_costs.geojson",
-  "row_count": 25834,
+  "row_count": 19872,
   "script": "etl/08_emit_frontend_data.py",
   "fetched_at": "2026-05-08T05:21:49+00:00",
   "value_field": "assessed_value",
@@ -22,5 +22,8 @@
     11,
     12,
     13
-  ]
+  ],
+  "deduped_by_tmk": true,
+  "rows_collapsed": 5962,
+  "note": "station_id replaced with station_ids: int[] array post-emit"
 }
