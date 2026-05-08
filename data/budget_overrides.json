@@ -1,0 +1,6 @@
+{
+  "_notes": "Manual overrides for line items pdfplumber can't parse. Any non-null value here wins over the value extracted from the City budget PDFs in step 03. The Board of Water Supply is semi-autonomous — its FY26 water-system O&M total is not in the City Operating Budget PDF; pull it from the BWS Budget Book and drop the integer (USD) into water_om_total_usd below.",
+  "road_om_total_usd": null,
+  "sewer_om_total_usd": null,
+  "water_om_total_usd": null
+}

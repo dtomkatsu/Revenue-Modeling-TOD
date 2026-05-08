@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skyline Revenue vs. Cost — Honolulu</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside id="sidebar">
+  <header>
+    <h1>Skyline TOD</h1>
+    <p class="subtitle">Revenue vs. infrastructure cost per acre</p>
+  </header>
+
+  <section class="control">
+    <label for="station-select">Station</label>
+    <select id="station-select">
+      <option value="">— All stations —</option>
+    </select>
+  </section>
+
+  <section class="control">
+    <label>Metric</label>
+    <div class="seg" id="mode-toggle" role="radiogroup">
+      <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true">Revenue / ac</button>
+      <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false">Cost / ac</button>
+      <button class="seg-btn" data-mode="net" role="radio" aria-checked="false">Net / ac</button>
+    </div>
+  </section>
+
+  <section class="control">
+    <label class="check">
+      <input type="checkbox" id="extrude-toggle">
+      <span>3D extrusion</span>
+    </label>
+  </section>
+
+  <section class="control">
+    <div id="legend" class="legend"></div>
+  </section>
+
+  <section class="control">
+    <h2>Summary</h2>
+    <div id="summary" class="summary">
+      <p class="muted">Loading…</p>
+    </div>
+  </section>
+
+  <footer>
+    <p class="muted">CARTO Positron · MapLibre GL JS</p>
+  </footer>
+</aside>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

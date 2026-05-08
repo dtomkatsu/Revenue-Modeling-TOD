@@ -1,0 +1,251 @@
+"""Step 08 — emit final frontend data files (parcels + station markers).
+
+Merges revenue (step 06) + cost (step 07) into ``data/parcels_tod.geojson``
+with the minimum properties the MapLibre frontend (``script.js``) needs:
+
+* ``tmk``               — parcel key (zero-padded 8-digit string)
+* ``station_id``        — int 1–13, the operating Skyline station
+* ``area_ac``           — parcel acreage (UTM-4N derived; see METHODOLOGY §2)
+* ``rev_per_ac``        — annual property tax / acres
+* ``cost_per_ac``       — frontage-prorated infrastructure O&M / acres
+* ``net_per_ac``        — rev_per_ac − cost_per_ac
+* ``frontage_road_ft``  — feet of road centerline within 5 ft of parcel
+* ``frontage_sewer_ft`` — feet of sewer main (or road proxy) within 5 ft
+* ``frontage_water_ft`` — feet of water main (or road proxy) within 5 ft
+* ``assessed_value``    — RPAD net taxable / total assessed value (USD)
+* ``land_use``          — RPAD class label that drives the millage rate
+* ``landlocked``        — bool, ``frontage_road_ft < 10``
+
+Also writes ``data/stations.geojson`` — point markers for the 13 operating
+stations with ``id`` + ``name`` properties (as expected by ``script.js``).
+
+Both outputs land in ``data/`` (NOT ``data/processed/``) so they're committed
+to git and served directly by the static frontend; ``.gitignore`` only
+excludes ``data/raw`` / ``data/cache`` / ``data/processed``.
+
+The ``assessed_value`` / ``land_use`` source columns are looked up from
+``parcels_revenue.geojson.manifest.json`` (written by step 06's auto-detect),
+falling back to the same heuristic candidate lists if the manifest is silent.
+
+Idempotent: skipped if both outputs and their manifests exist. Pass
+``--force`` to rebuild.
+
+Usage::
+
+    python etl/08_emit_frontend_data.py
+    python etl/08_emit_frontend_data.py --force
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import geopandas as gpd
+import pandas as pd
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from common.manifest import read_manifest, write_manifest  # noqa: E402
+
+
+SCRIPT_NAME = "etl/08_emit_frontend_data.py"
+
+REVENUE_PATH  = _ROOT / "data" / "processed" / "parcels_revenue.geojson"
+COSTS_PATH    = _ROOT / "data" / "processed" / "parcels_costs.geojson"
+STATIONS_PATH = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojson"
+
+OUTPUT_PARCELS  = _ROOT / "data" / "parcels_tod.geojson"
+OUTPUT_STATIONS = _ROOT / "data" / "stations.geojson"
+
+WGS84 = 4326
+
+# IDs of the 13 currently operating Skyline stations (Segments 1+2). Mirrors
+# etl/04_build_walksheds.EXPECTED_STATIONS keys.
+OPERATING_STATION_IDS = list(range(1, 14))
+
+# Same heuristics as step 06 — used as a fallback if the revenue manifest
+# doesn't record the actual columns.
+VALUE_FIELD_CANDIDATES = (
+    "net_taxable_value", "nettaxablevalue", "taxable_value",
+    "total_assessed_value", "totalassessed", "assessed_value", "totalvalue",
+)
+CLASS_FIELD_CANDIDATES = (
+    "tax_class", "property_class", "class_code", "land_use_class",
+    "rpa_class", "puc", "class",
+)
+
+
+def _first_present(cols_lower: dict[str, str], candidates: tuple[str, ...]) -> str | None:
+    for c in candidates:
+        if c in cols_lower:
+            return cols_lower[c]
+    return None
+
+
+def _resolve_field(
+    df: pd.DataFrame,
+    rev_manifest: dict | None,
+    manifest_key: str,
+    candidates: tuple[str, ...],
+) -> str | None:
+    """Prefer the column step 06 recorded; fall back to candidate list."""
+    if rev_manifest:
+        name = rev_manifest.get(manifest_key)
+        if name and name in df.columns:
+            return name
+    cols_lower = {c.lower(): c for c in df.columns}
+    return _first_present(cols_lower, candidates)
+
+
+def _coerce_number(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(s):
+        return s.astype(float)
+    cleaned = s.astype(str).str.replace(r"[\$,\s]", "", regex=True)
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
+def emit_frontend(*, force: bool) -> int:
+    for p, hint in (
+        (REVENUE_PATH,  "python etl/06_compute_revenue.py"),
+        (COSTS_PATH,    "python etl/07_compute_frontage_costs.py"),
+        (STATIONS_PATH, "python etl/01_fetch_arcgis.py rail_transit_station_points"),
+    ):
+        if not p.exists():
+            raise FileNotFoundError(f"Missing {p}. Run `{hint}` first.")
+
+    p_manifest = OUTPUT_PARCELS.with_suffix(OUTPUT_PARCELS.suffix + ".manifest.json")
+    s_manifest = OUTPUT_STATIONS.with_suffix(OUTPUT_STATIONS.suffix + ".manifest.json")
+    if (not force
+            and OUTPUT_PARCELS.exists()  and p_manifest.exists()
+            and OUTPUT_STATIONS.exists() and s_manifest.exists()):
+        print(f"[skip] {OUTPUT_PARCELS.name}, {OUTPUT_STATIONS.name} (cached)")
+        return 0
+
+    rev_manifest = read_manifest(REVENUE_PATH)
+
+    print(f"[read] {REVENUE_PATH.relative_to(_ROOT)}")
+    rev = gpd.read_file(REVENUE_PATH)
+    if rev.crs is None:
+        rev = rev.set_crs(WGS84)
+    elif rev.crs.to_epsg() != WGS84:
+        rev = rev.to_crs(WGS84)
+    if "tmk" not in rev.columns:
+        raise KeyError(f"{REVENUE_PATH.name} missing 'tmk' field")
+    if "STATION_ID" not in rev.columns:
+        raise KeyError(f"{REVENUE_PATH.name} missing 'STATION_ID' field")
+
+    print(f"[read] {COSTS_PATH.relative_to(_ROOT)}")
+    cost = gpd.read_file(COSTS_PATH)
+    if "tmk" not in cost.columns:
+        raise KeyError(f"{COSTS_PATH.name} missing 'tmk' field")
+
+    cost_attrs = pd.DataFrame(
+        cost[[
+            "tmk",
+            "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
+            "cost_per_ac", "landlocked",
+        ]]
+    ).drop_duplicates("tmk", keep="last")
+
+    merged = rev.merge(cost_attrs, on="tmk", how="left")
+    n_unmatched = int(merged["cost_per_ac"].isna().sum())
+    if n_unmatched:
+        print(f"[warn] {n_unmatched}/{len(merged)} revenue rows missing cost data after join")
+
+    value_field = _resolve_field(merged, rev_manifest, "value_field", VALUE_FIELD_CANDIDATES)
+    class_field = _resolve_field(merged, rev_manifest, "class_field", CLASS_FIELD_CANDIDATES)
+
+    if value_field:
+        merged["assessed_value"] = _coerce_number(merged[value_field])
+        print(f"[field] assessed_value <- {value_field!r}")
+    else:
+        print("[warn] no assessed-value column found; assessed_value will be null")
+        merged["assessed_value"] = pd.NA
+
+    if class_field:
+        col = merged[class_field]
+        merged["land_use"] = col.where(col.notna(), None).astype("object")
+        print(f"[field] land_use       <- {class_field!r}")
+    else:
+        print("[warn] no land-use class column found; land_use will be null")
+        merged["land_use"] = None
+
+    merged["station_id"] = merged["STATION_ID"].astype(int)
+    merged["net_per_ac"] = merged["rev_per_ac"] - merged["cost_per_ac"]
+
+    keep = [
+        "tmk", "station_id", "area_ac",
+        "rev_per_ac", "cost_per_ac", "net_per_ac",
+        "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
+        "assessed_value", "land_use", "landlocked",
+        "geometry",
+    ]
+    out_parcels = merged[keep].copy()
+
+    OUTPUT_PARCELS.parent.mkdir(parents=True, exist_ok=True)
+    if OUTPUT_PARCELS.exists():
+        OUTPUT_PARCELS.unlink()
+    out_parcels.to_file(OUTPUT_PARCELS, driver="GeoJSON")
+    write_manifest(
+        OUTPUT_PARCELS,
+        source_url=f"file://{REVENUE_PATH} + file://{COSTS_PATH}",
+        row_count=len(out_parcels),
+        script=SCRIPT_NAME,
+        extras={
+            "value_field":          value_field,
+            "class_field":          class_field,
+            "rows_unmatched_cost":  n_unmatched,
+            "crs":                  f"EPSG:{WGS84}",
+            "stations_represented": sorted(out_parcels["station_id"].unique().tolist()),
+        },
+    )
+    print(f"[done] {OUTPUT_PARCELS.relative_to(_ROOT)} ({len(out_parcels)} rows)")
+
+    # ---- Stations -------------------------------------------------------
+    print(f"[read] {STATIONS_PATH.relative_to(_ROOT)}")
+    stations = gpd.read_file(STATIONS_PATH)
+    if stations.crs is None:
+        stations = stations.set_crs(WGS84)
+    elif stations.crs.to_epsg() != WGS84:
+        stations = stations.to_crs(WGS84)
+    if "ID" not in stations.columns or "STATION" not in stations.columns:
+        raise KeyError(f"{STATIONS_PATH.name} missing ID/STATION fields")
+
+    operating = stations[stations["ID"].isin(OPERATING_STATION_IDS)].copy()
+    operating = operating.sort_values("ID").reset_index(drop=True)
+    operating = operating.rename(columns={"ID": "id", "STATION": "name"})
+    operating = operating[["id", "name", "geometry"]]
+    operating["id"] = operating["id"].astype(int)
+
+    if OUTPUT_STATIONS.exists():
+        OUTPUT_STATIONS.unlink()
+    operating.to_file(OUTPUT_STATIONS, driver="GeoJSON")
+    write_manifest(
+        OUTPUT_STATIONS,
+        source_url=f"file://{STATIONS_PATH}",
+        row_count=len(operating),
+        script=SCRIPT_NAME,
+        extras={
+            "operating_only": True,
+            "station_ids":    sorted(operating["id"].tolist()),
+            "crs":            f"EPSG:{WGS84}",
+        },
+    )
+    print(f"[done] {OUTPUT_STATIONS.relative_to(_ROOT)} ({len(operating)} stations)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    ap.add_argument("--force", action="store_true",
+                    help="Rebuild even if the cache exists.")
+    args = ap.parse_args(argv)
+    return emit_frontend(force=args.force)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
