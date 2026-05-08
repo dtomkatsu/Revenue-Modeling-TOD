@@ -436,9 +436,13 @@ function bindHoverPopup() {
   // parcel but maplibre returns empty queryRenderedFeatures between gap
   // pixels of adjacent extrusions of different heights. We compensate
   // with two mechanisms:
-  //   1. Generous bbox query (HOVER_BBOX_PX). With pitched 3D the rendered
-  //      top of a parcel can be a few px off from the cursor's exact pixel;
-  //      a small bbox absorbs that.
+  //   1. Large bbox query (HOVER_BBOX_PX). MapLibre's queryRenderedFeatures
+  //      for fill-extrusion uses the GROUND polygon as the hit shape, not
+  //      the rendered top face — in pitched 3D the rendered bar is offset
+  //      tens of pixels from where the ground polygon projects to. Without
+  //      a wide bbox, most cursor positions on the visible bar return
+  //      empty. 40 px catches the bar shift across all reasonable extrusion
+  //      heights without grabbing too many neighbors.
   //   2. Sticky hover. If the previously-hovered TMK is still among the
   //      candidates, keep it (don't shuffle to whatever happens to be
   //      first in the result list — that flips frame-to-frame).
@@ -447,7 +451,7 @@ function bindHoverPopup() {
   //      cursor often lands on basemap pixels even though it's visually
   //      on the parcel. Only clear when cursor crosses to a *different*
   //      parcel candidate (or leaves the canvas, handled below).
-  const HOVER_BBOX_PX = 6;
+  const HOVER_BBOX_PX = 40;
   map.on('mousemove', (e) => {
     const features = map.queryRenderedFeatures(
       [[e.point.x - HOVER_BBOX_PX, e.point.y - HOVER_BBOX_PX],
