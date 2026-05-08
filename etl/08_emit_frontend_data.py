@@ -7,8 +7,10 @@ with the minimum properties the MapLibre frontend (``script.js``) needs:
 * ``station_id``        — int 1–13, the operating Skyline station
 * ``area_ac``           — parcel acreage (UTM-4N derived; see METHODOLOGY §2)
 * ``rev_per_ac``        — annual property tax / acres
-* ``cost_per_ac``       — frontage-prorated infrastructure O&M / acres
-* ``net_per_ac``        — rev_per_ac − cost_per_ac
+* ``cost_om_per_ac``    — frontage-prorated O&M only / acres
+* ``cip_per_ac``        — frontage-prorated CIP only / acres (annualized 6yr-avg)
+* ``cost_per_ac``       — frontage-prorated total infrastructure (O&M + CIP) / acres
+* ``net_per_ac``        — rev_per_ac − cost_per_ac (i.e. rev − (O&M + CIP))
 * ``frontage_road_ft``  — feet of road centerline within 5 ft of parcel
 * ``frontage_sewer_ft`` — feet of sewer main (or road proxy) within 5 ft
 * ``frontage_water_ft`` — feet of water main (or road proxy) within 5 ft
@@ -176,7 +178,7 @@ def emit_frontend(*, force: bool) -> int:
         cost[[
             "tmk",
             "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
-            "cost_per_ac", "landlocked",
+            "cost_om_per_ac", "cip_per_ac", "cost_per_ac", "landlocked",
         ]]
     ).drop_duplicates("tmk", keep="last")
 
@@ -245,7 +247,8 @@ def emit_frontend(*, force: bool) -> int:
     # of station_ids preserved as an array; the frontend filter uses an
     # 'in' membership test against that array.
     parcel_props = [
-        "tmk", "area_ac", "rev_per_ac", "cost_per_ac", "net_per_ac",
+        "tmk", "area_ac", "rev_per_ac",
+        "cost_om_per_ac", "cip_per_ac", "cost_per_ac", "net_per_ac",
         "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
         "assessed_value", "land_use", "address", "landlocked",
     ]

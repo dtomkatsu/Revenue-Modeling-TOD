@@ -69,6 +69,7 @@ SCRIPT_NAME = "etl/07_compute_frontage_costs.py"
 
 PARCELS_IN_PATH = _ROOT / "data" / "processed" / "parcels_in_walksheds.geojson"
 BUDGET_PATH     = _ROOT / "data" / "processed" / "budget_totals.json"
+CIP_PATH        = _ROOT / "data" / "processed" / "cip_totals.json"
 ROADS_PATH      = _ROOT / "data" / "raw"       / "road_centerlines.geojson"
 GUIDEWAY_PATH   = _ROOT / "data" / "raw"       / "rail_transit_guideway_alignment_line.geojson"
 SEWER_PATH      = _ROOT / "data" / "raw"       / "sewer_mains.geojson"
@@ -197,6 +198,11 @@ def compute_frontage_costs(*, force: bool) -> int:
             f"Missing {BUDGET_PATH}. Run "
             f"`python etl/03_extract_budget_totals.py` first."
         )
+    if not CIP_PATH.exists():
+        raise FileNotFoundError(
+            f"Missing {CIP_PATH}. Run "
+            f"`python etl/03b_extract_cip_totals.py` first."
+        )
 
     manifest_path = OUTPUT_PATH.with_suffix(OUTPUT_PATH.suffix + ".manifest.json")
     if not force and OUTPUT_PATH.exists() and manifest_path.exists():
@@ -204,6 +210,7 @@ def compute_frontage_costs(*, force: bool) -> int:
         return 0
 
     budget = json.loads(BUDGET_PATH.read_text())
+    cip    = json.loads(CIP_PATH.read_text())
 
     print(f"[read] {PARCELS_IN_PATH.relative_to(_ROOT)}")
     parcels = gpd.read_file(PARCELS_IN_PATH)
@@ -272,13 +279,23 @@ def compute_frontage_costs(*, force: bool) -> int:
     sewer_rate = _rate(budget.get("sewer_om_total_usd"), total_sewer_ft)
     water_rate = _rate(budget.get("water_om_total_usd"), total_water_ft)
 
+    cip_road_rate  = _rate(cip.get("road_cip_total_usd"),  total_road_ft)
+    cip_sewer_rate = _rate(cip.get("sewer_cip_total_usd"), total_sewer_ft)
+    cip_water_rate = _rate(cip.get("water_cip_total_usd"), total_water_ft)
+
     def _fmt_rate(r): return f"${r:,.4f}/ft" if r is not None else "n/a"
-    print(f"[rates] road  = {_fmt_rate(road_rate)}  "
+    print(f"[rates] road  O&M = {_fmt_rate(road_rate)}  "
           f"({budget.get('road_om_total_usd')!r} / {total_road_ft:,.0f} ft)")
-    print(f"[rates] sewer = {_fmt_rate(sewer_rate)} "
+    print(f"[rates] sewer O&M = {_fmt_rate(sewer_rate)} "
           f"({budget.get('sewer_om_total_usd')!r} / {total_sewer_ft:,.0f} ft)")
-    print(f"[rates] water = {_fmt_rate(water_rate)} "
+    print(f"[rates] water O&M = {_fmt_rate(water_rate)} "
           f"({budget.get('water_om_total_usd')!r} / {total_water_ft:,.0f} ft)")
+    print(f"[rates] road  CIP = {_fmt_rate(cip_road_rate)}  "
+          f"({cip.get('road_cip_total_usd')!r} / {total_road_ft:,.0f} ft)")
+    print(f"[rates] sewer CIP = {_fmt_rate(cip_sewer_rate)} "
+          f"({cip.get('sewer_cip_total_usd')!r} / {total_sewer_ft:,.0f} ft)")
+    print(f"[rates] water CIP = {_fmt_rate(cip_water_rate)} "
+          f"({cip.get('water_cip_total_usd')!r} / {total_water_ft:,.0f} ft)")
 
     # ---- Per-parcel frontage --------------------------------------------
     print(f"[frontage] computing for {n_unique} parcels...")
@@ -301,27 +318,51 @@ def compute_frontage_costs(*, force: bool) -> int:
     parcels_unique["landlocked"]        = road_ft < LANDLOCKED_FT
 
     nan_arr = np.full(n_unique, np.nan)
-    cost_road  = road_ft  * road_rate  if road_rate  is not None else nan_arr
-    cost_sewer = sewer_ft * sewer_rate if sewer_rate is not None else nan_arr
-    cost_water = water_ft * water_rate if water_rate is not None else nan_arr
 
-    parcels_unique["cost_road_usd"]  = cost_road
-    parcels_unique["cost_sewer_usd"] = cost_sewer
-    parcels_unique["cost_water_usd"] = cost_water
+    def _mult(rate, frontage):
+        return frontage * rate if rate is not None else nan_arr.copy()
 
-    stacked = np.stack([cost_road, cost_sewer, cost_water])
-    cost_total = np.nansum(stacked, axis=0)
-    cost_total[np.all(np.isnan(stacked), axis=0)] = np.nan
-    parcels_unique["cost_total_usd"] = cost_total
+    om_road_arr  = _mult(road_rate,  road_ft)
+    om_sewer_arr = _mult(sewer_rate, sewer_ft)
+    om_water_arr = _mult(water_rate, water_ft)
+    cip_road_arr  = _mult(cip_road_rate,  road_ft)
+    cip_sewer_arr = _mult(cip_sewer_rate, sewer_ft)
+    cip_water_arr = _mult(cip_water_rate, water_ft)
+
+    parcels_unique["cost_om_road_usd"]   = om_road_arr
+    parcels_unique["cost_om_sewer_usd"]  = om_sewer_arr
+    parcels_unique["cost_om_water_usd"]  = om_water_arr
+    parcels_unique["cost_cip_road_usd"]  = cip_road_arr
+    parcels_unique["cost_cip_sewer_usd"] = cip_sewer_arr
+    parcels_unique["cost_cip_water_usd"] = cip_water_arr
+
+    def _sum_stack(arrs):
+        st = np.stack(arrs)
+        out = np.nansum(st, axis=0)
+        out[np.all(np.isnan(st), axis=0)] = np.nan
+        return out
+
+    om_total_usd  = _sum_stack([om_road_arr,  om_sewer_arr,  om_water_arr])
+    cip_total_usd = _sum_stack([cip_road_arr, cip_sewer_arr, cip_water_arr])
+    cost_total    = _sum_stack([om_total_usd, cip_total_usd])
+
+    parcels_unique["cost_om_total_usd"]  = om_total_usd
+    parcels_unique["cost_cip_total_usd"] = cip_total_usd
+    parcels_unique["cost_total_usd"]     = cost_total
 
     area = parcels_unique["area_ac"].to_numpy()
-    parcels_unique["cost_per_ac"] = np.where(area > 0, cost_total / area, np.nan)
+    parcels_unique["cost_om_per_ac"]  = np.where(area > 0, om_total_usd  / area, np.nan)
+    parcels_unique["cip_per_ac"]      = np.where(area > 0, cip_total_usd / area, np.nan)
+    parcels_unique["cost_per_ac"]     = np.where(area > 0, cost_total    / area, np.nan)
 
     keep_cols = [
         "tmk", "area_ac",
         "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
-        "cost_road_usd", "cost_sewer_usd", "cost_water_usd",
-        "cost_total_usd", "cost_per_ac", "landlocked",
+        "cost_om_road_usd",  "cost_om_sewer_usd",  "cost_om_water_usd",
+        "cost_cip_road_usd", "cost_cip_sewer_usd", "cost_cip_water_usd",
+        "cost_om_total_usd", "cost_cip_total_usd", "cost_total_usd",
+        "cost_om_per_ac",    "cip_per_ac",         "cost_per_ac",
+        "landlocked",
         "geometry",
     ]
     parcels_out = parcels_unique[keep_cols].set_geometry("geometry")
@@ -358,12 +399,19 @@ def compute_frontage_costs(*, force: bool) -> int:
             "total_road_centerline_ft":  total_road_ft,
             "total_sewer_main_ft":       total_sewer_ft,
             "total_water_main_ft":       total_water_ft,
-            "rate_road_usd_per_ft":      road_rate,
-            "rate_sewer_usd_per_ft":     sewer_rate,
-            "rate_water_usd_per_ft":     water_rate,
-            "budget_road_usd":           budget.get("road_om_total_usd"),
-            "budget_sewer_usd":          budget.get("sewer_om_total_usd"),
-            "budget_water_usd":          budget.get("water_om_total_usd"),
+            "rate_road_om_usd_per_ft":   road_rate,
+            "rate_sewer_om_usd_per_ft":  sewer_rate,
+            "rate_water_om_usd_per_ft":  water_rate,
+            "rate_road_cip_usd_per_ft":  cip_road_rate,
+            "rate_sewer_cip_usd_per_ft": cip_sewer_rate,
+            "rate_water_cip_usd_per_ft": cip_water_rate,
+            "budget_road_om_usd":        budget.get("road_om_total_usd"),
+            "budget_sewer_om_usd":       budget.get("sewer_om_total_usd"),
+            "budget_water_om_usd":       budget.get("water_om_total_usd"),
+            "budget_road_cip_usd":       cip.get("road_cip_total_usd"),
+            "budget_sewer_cip_usd":      cip.get("sewer_cip_total_usd"),
+            "budget_water_cip_usd":      cip.get("water_cip_total_usd"),
+            "cip_annualization":         cip.get("annualization"),
             "parcels_input_rows":        int(n_parcel_rows),
             "unique_parcels":            int(n_unique),
             "landlocked_parcels":        n_landlocked,

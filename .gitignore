@@ -16,3 +16,6 @@ data/processed/
 # Planetiler auxiliary downloads + tile weights (rebuildable, ~1.3 GB)
 data/sources/
 data/tile_weights.tsv.gz
+
+# Regression snapshots used during pipeline rework (e.g. CIP integration).
+data/_*_snapshot.json
