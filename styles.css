@@ -229,6 +229,133 @@ select, button, input {
   accent-color: var(--c-teal);  /* tints the native checkbox */
 }
 
+/* Filter panel — slider rows with teal accents matching the design system.
+   Each filter has a header row (label + current value) and a native range
+   input restyled to look like the rest of the UI. The "Off" state on
+   the value badge means the filter is at zero and inactive. */
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.filter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11.5px;
+}
+.filter-name {
+  color: var(--text-soft);
+  letter-spacing: 0.01em;
+}
+.filter-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--c-teal);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(107, 158, 120, 0.10);
+  border: 1px solid rgba(107, 158, 120, 0.22);
+}
+.filter-val.off {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  font-weight: 500;
+}
+
+/* Native range slider — track + thumb retinted in teal. */
+.slider {
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgba(202, 210, 197, 0.14);
+  border-radius: 2px;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: var(--c-teal);
+  border: 2px solid var(--c-slate);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  margin-top: -5px;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.slider:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.20), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.slider::-moz-range-track {
+  height: 4px;
+  background: rgba(202, 210, 197, 0.14);
+  border-radius: 2px;
+  border: none;
+}
+.slider::-moz-range-progress {
+  height: 4px;
+  background: var(--c-teal);
+  border-radius: 2px;
+}
+.slider::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: var(--c-teal);
+  border: 2px solid var(--c-slate);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+.slider:focus { outline: none; }
+.slider:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.filter-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  min-height: 22px;
+}
+.filter-count {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.filter-reset {
+  padding: 4px 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.filter-reset:hover {
+  background: rgba(107, 158, 120, 0.10);
+  color: var(--c-white);
+  border-color: var(--c-teal);
+}
+.filter-reset[hidden] { display: none; }
+
 .legend {
   display: flex;
   flex-direction: column;
@@ -487,6 +614,199 @@ select, button, input {
 .parcel-tooltip .pp-row.primary .v {
   color: var(--c-teal);
   font-weight: 700;
+}
+
+/* Click-to-open parcel detail popup. Frosted-glass card — translucent so
+   the map underneath bleeds through, with a strong backdrop-filter blur
+   that compresses visual noise so text stays legible. More elegant than
+   the hover tooltip: lighter type, generous whitespace, hairline
+   dividers, and refined teal accents instead of heavy borders. */
+.parcel-popup {
+  position: fixed;
+  z-index: 30;
+  width: 300px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Slightly darker base layer + heavier blur — keeps the frosted-glass
+     feel while giving text a more reliable contrast floor. */
+  background:
+    linear-gradient(168deg, rgba(107, 158, 120, 0.10) 0%, transparent 55%),
+    rgba(28, 38, 43, 0.86);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  color: var(--c-white);
+  /* Subtle text-shadow on every descendant — defines glyphs against
+     whatever the map shows underneath without making text look heavy. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(202, 210, 197, 0.14);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(107, 158, 120, 0.10),
+    0 18px 50px rgba(0, 0, 0, 0.50),
+    0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  /* Smooth fade-in when the popup opens — feels less jarring than an
+     instant pop. */
+  animation: popup-in 0.18s ease-out;
+}
+.parcel-popup[hidden] { display: none; }
+
+@keyframes popup-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);     }
+}
+
+/* Thin teal accent line at the very top — replaces the heavy 3px border
+   and reads as a delicate trim rather than a bar. */
+.parcel-popup::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 14px; right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(107, 158, 120, 0.55) 30%,
+    rgba(107, 158, 120, 0.55) 70%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+/* Soft sea-foam glow in the upper-right — diffuse, not a hard triangle.
+   Anchors the design back to the sidebar accent palette without
+   competing with the data. */
+.parcel-popup::after {
+  content: '';
+  position: absolute;
+  top: -20px; right: -20px;
+  width: 110px; height: 110px;
+  background: radial-gradient(circle at center,
+    rgba(107, 158, 120, 0.22) 0%,
+    rgba(107, 158, 120, 0.06) 40%,
+    transparent 70%);
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+.parcel-popup__head {
+  padding: 16px 18px 14px;
+  position: relative;
+  /* Hairline divider via box-shadow — sharper than a 1px border at low
+     alpha, and respects the rounded corners of the panel. */
+  box-shadow: 0 1px 0 rgba(202, 210, 197, 0.06);
+}
+.parcel-popup__title {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--c-white);
+  margin: 0 28px 4px 0;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.parcel-popup__sub {
+  color: rgba(202, 210, 197, 0.85);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+.parcel-popup__close {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 24px; height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.parcel-popup__close:hover {
+  background: rgba(202, 210, 197, 0.12);
+  color: var(--c-white);
+}
+
+.parcel-popup__section {
+  padding: 12px 18px 13px;
+  /* Hairline section divider, same technique as the head */
+  box-shadow: 0 1px 0 rgba(202, 210, 197, 0.05);
+}
+.parcel-popup__section:last-child { box-shadow: none; }
+
+.parcel-popup__section h3 {
+  margin: 0 0 8px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  /* Brighter sea-foam — full saturation, full alpha, with a subtle dark
+     glow underneath so the small uppercase reads cleanly. */
+  color: #8FB89A;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+.parcel-popup__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+.parcel-popup__row .k {
+  color: rgba(202, 210, 197, 0.82);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+}
+/* Value chip — slightly more opaque background and crisper border so the
+   number reads at a glance over a busy frosted background. White text
+   instead of ash so it sits on top of the chip with full clarity. */
+.parcel-popup__row .v {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--c-white);
+  background: rgba(107, 158, 120, 0.16);
+  border: 1px solid rgba(107, 158, 120, 0.32);
+  letter-spacing: -0.005em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+/* Net positive/negative — slightly more saturated than the default chip
+   so the headline metric stands out, but still translucent. */
+.parcel-popup__row .v.net-pos {
+  color: var(--c-white);
+  background: rgba(107, 158, 120, 0.22);
+  border-color: rgba(107, 158, 120, 0.42);
+}
+.parcel-popup__row .v.net-neg {
+  color: #FCA5A5;
+  background: rgba(185, 28, 28, 0.14);
+  border-color: rgba(185, 28, 28, 0.34);
+}
+
+/* Landlocked warning chip — translucent brick. */
+.parcel-popup__chip {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: #FCA5A5;
+  background: rgba(185, 28, 28, 0.14);
+  border: 1px solid rgba(185, 28, 28, 0.34);
 }
 
 /* Floating glass-panel station labels (HTML markers anchored to station

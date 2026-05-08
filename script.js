@@ -40,6 +40,13 @@ const STATE = {
   filtered: [],         // currently visible parcel features
   domain: [0, 1],       // [min, max] of color metric (98th-pct clipped)
   heightDomain: [0, 1], // [min, max] of rev_per_ac across visible parcels
+  // Slider positions 0–100. 0 means filter is off; values map to a dollar
+  // threshold via STATE.{assessedMax,taxMax} (99th-pct of the data so the
+  // sliders aren't dominated by outliers).
+  minAssessed: 0,
+  minTax: 0,
+  assessedMax: 0,       // 99th-pct of assessed_value across all parcels
+  taxMax: 0,            // 99th-pct of (rev_per_ac × area_ac)
 };
 
 // Height is ALWAYS revenue per acre (Urban3 convention: bar height = parcel
@@ -58,7 +65,12 @@ const fmtUSDk = (n) => {
 const fmtInt = new Intl.NumberFormat('en-US');
 
 let hoveredTmk = null;
+let selectedTmk = null;
 const tooltipEl = document.getElementById('parcel-tooltip');
+const popupEl = document.getElementById('parcel-popup');
+
+// Format imperial-feet length values for the popup ("143 ft").
+const fmtFt = (n) => Number.isFinite(+n) ? `${Math.round(+n).toLocaleString('en-US')} ft` : '—';
 
 // Register the pmtiles:// protocol so MapLibre can fetch tile ranges out of
 // our self-hosted single-file Hawaii basemap (data/honolulu_basemap.pmtiles).
@@ -125,6 +137,12 @@ map.getContainer().addEventListener('mouseleave', () => {
   tooltipEl.hidden = true;
 });
 
+// Escape closes the click popup. Click-outside (i.e. clicking empty map)
+// is already handled via deck.gl's onClick passing object:null.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && selectedTmk !== null) closePopup();
+});
+
 map.on('load', async () => {
   try {
     const [parcels, stations, railLine] = await Promise.all([
@@ -137,6 +155,7 @@ map.on('load', async () => {
     STATE.railLine = railLine;
 
     populateStationDropdown(stations);
+    computeFilterMaxes(parcels.features);
     addLayers();
     wireUI();
     refresh();
@@ -240,6 +259,34 @@ function getStationId(f) {
 
 function getStationName(f) {
   return f.properties?.name ?? f.properties?.station_name ?? `Station ${getStationId(f)}`;
+}
+
+// Compute 99th-percentile maxes for the slider scaling. Outlier-resistant
+// so the slider isn't dominated by the few mega-parcels in the dataset.
+function computeFilterMaxes(features) {
+  const assessed = [];
+  const taxes = [];
+  for (const f of features || []) {
+    const av = +f.properties?.assessed_value;
+    if (Number.isFinite(av) && av > 0) assessed.push(av);
+    const rpa = +f.properties?.rev_per_ac;
+    const ac  = +f.properties?.area_ac;
+    if (Number.isFinite(rpa) && Number.isFinite(ac) && ac > 0) {
+      taxes.push(rpa * ac);
+    }
+  }
+  const pct99 = (arr) => {
+    if (!arr.length) return 0;
+    arr.sort((a, b) => a - b);
+    return arr[Math.min(arr.length - 1, Math.floor(arr.length * 0.99))];
+  };
+  STATE.assessedMax = pct99(assessed);
+  STATE.taxMax      = pct99(taxes);
+}
+
+// Slider position (0–100) → dollar threshold. 0 means the filter is off.
+function thresholdFor(pct, max) {
+  return pct === 0 ? 0 : (pct / 100) * max;
 }
 
 function populateStationDropdown(stations) {
@@ -346,6 +393,119 @@ function buildHTML(p) {
   `;
 }
 
+// Resolve a list of station_ids on a parcel to readable station names by
+// looking up each id in STATE.stations.features. Falls back to "Station N"
+// via getStationName() if the dropdown name isn't populated.
+function resolveStationNames(stationIds) {
+  if (!Array.isArray(stationIds) || !stationIds.length) return [];
+  const features = STATE.stations?.features || [];
+  return stationIds
+    .map((id) => {
+      const f = features.find((g) => +getStationId(g) === +id);
+      return f ? getStationName(f) : `Station ${id}`;
+    })
+    .filter(Boolean);
+}
+
+function buildPopupHTML(p) {
+  const addr = p.address && p.address !== 'null' ? p.address : null;
+  const acres = +p.area_ac;
+  const hasAcres = Number.isFinite(acres);
+  // Annual dollar amounts derived from the per-acre rates × parcel area.
+  const annualRev  = hasAcres && Number.isFinite(+p.rev_per_ac)  ? +p.rev_per_ac  * acres : NaN;
+  const annualCost = hasAcres && Number.isFinite(+p.cost_per_ac) ? +p.cost_per_ac * acres : NaN;
+  const annualNet  = hasAcres && Number.isFinite(+p.net_per_ac)  ? +p.net_per_ac  * acres : NaN;
+  const netPosClass = (n) => Number.isFinite(n) ? (n >= 0 ? ' net-pos' : ' net-neg') : '';
+  const subParts = [];
+  if (p.tmk)      subParts.push(`TMK ${escapeHTML(String(p.tmk))}`);
+  if (p.land_use) subParts.push(escapeHTML(String(p.land_use)));
+  const stationNames = resolveStationNames(p.station_ids);
+
+  return `
+    <div class="parcel-popup__head">
+      <button class="parcel-popup__close" aria-label="Close">×</button>
+      <div class="parcel-popup__title">${escapeHTML(addr ?? p.tmk ?? 'Parcel')}</div>
+      ${subParts.length ? `<div class="parcel-popup__sub">${subParts.join(' · ')}</div>` : ''}
+    </div>
+
+    <div class="parcel-popup__section">
+      <h3>Assessment</h3>
+      <div class="parcel-popup__row"><span class="k">Assessed value</span><span class="v">${fmtUSDk(+p.assessed_value)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Property tax</span><span class="v">${fmtUSDk(annualRev)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Infrastructure cost</span><span class="v">${fmtUSDk(annualCost)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Net</span><span class="v${netPosClass(annualNet)}">${fmtUSDk(annualNet)}</span></div>
+    </div>
+
+    <div class="parcel-popup__section">
+      <h3>Per acre</h3>
+      <div class="parcel-popup__row"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Net / ac</span><span class="v${netPosClass(+p.net_per_ac)}">${fmtUSDk(+p.net_per_ac)}</span></div>
+    </div>
+
+    <div class="parcel-popup__section">
+      <h3>Physical</h3>
+      ${hasAcres ? `<div class="parcel-popup__row"><span class="k">Area</span><span class="v">${acres.toFixed(2)} ac</span></div>` : ''}
+      <div class="parcel-popup__row"><span class="k">Road frontage</span><span class="v">${fmtFt(p.frontage_road_ft)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Sewer frontage</span><span class="v">${fmtFt(p.frontage_sewer_ft)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Water frontage</span><span class="v">${fmtFt(p.frontage_water_ft)}</span></div>
+      ${p.landlocked === true ? `<span class="parcel-popup__chip">Landlocked</span>` : ''}
+    </div>
+
+    ${stationNames.length ? `
+    <div class="parcel-popup__section">
+      <h3>Walking distance to</h3>
+      <div style="font-size:12px;color:var(--text-soft);line-height:1.5;">
+        ${stationNames.map(escapeHTML).join(', ')}
+      </div>
+    </div>` : ''}
+  `;
+}
+
+// Place the popup near (x, y) — preferring right-of-click — and flip sides
+// or clamp vertically if it would overflow the viewport.
+function positionPopup(x, y) {
+  const rect = map.getContainer().getBoundingClientRect();
+  const w = popupEl.offsetWidth || 290;
+  const h = popupEl.offsetHeight || 400;
+  const margin = 8;
+  let px = rect.left + x + 18;
+  if (px + w > window.innerWidth - margin) {
+    px = rect.left + x - w - 18;
+  }
+  px = Math.max(margin, px);
+  let py = rect.top + y - h / 2;
+  py = Math.max(rect.top + margin, Math.min(py, rect.bottom - h - margin, window.innerHeight - h - margin));
+  popupEl.style.left = px + 'px';
+  popupEl.style.top  = py + 'px';
+}
+
+function openPopup(props, x, y) {
+  selectedTmk = props.tmk ?? null;
+  popupEl.innerHTML = buildPopupHTML(props);
+  popupEl.hidden = false;
+  // Close button has to be wired after innerHTML is set.
+  const closeBtn = popupEl.querySelector('.parcel-popup__close');
+  if (closeBtn) closeBtn.addEventListener('click', closePopup);
+  positionPopup(x, y);
+  refreshLayer();
+}
+
+function closePopup() {
+  if (selectedTmk === null && popupEl.hidden) return;
+  selectedTmk = null;
+  popupEl.hidden = true;
+  refreshLayer();
+}
+
+function handleClick({ object, x, y }) {
+  if (object) {
+    openPopup(object.properties, x, y);
+  } else {
+    closePopup();
+  }
+}
+
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
   return [
@@ -407,15 +567,23 @@ function buildParcelLayer() {
       if (!Number.isFinite(v)) return MIN_HEIGHT_M;
       return Math.max(MIN_HEIGHT_M, scale * Math.sqrt(Math.min(peak, v)));
     },
-    getLineColor: (f) =>
-      f.properties.tmk === hoveredTmk ? [14, 165, 233, 255] : [40, 50, 55, 200],
-    getLineWidth: (f) => (f.properties.tmk === hoveredTmk ? 3 : 1),
+    getLineColor: (f) => {
+      if (f.properties.tmk === hoveredTmk)  return [14, 165, 233, 255];   // cyan hover
+      if (f.properties.tmk === selectedTmk) return [107, 158, 120, 255];  // teal selected
+      return [40, 50, 55, 200];
+    },
+    getLineWidth: (f) => {
+      if (f.properties.tmk === selectedTmk) return 4;
+      if (f.properties.tmk === hoveredTmk)  return 3;
+      return 1;
+    },
     onHover: handleHover,
+    onClick: handleClick,
     updateTriggers: {
       getFillColor: [STATE.mode, lo, hi, hoveredTmk],
       getElevation: [STATE.heightDomain[0], STATE.heightDomain[1], STATE.extrude],
-      getLineColor: [hoveredTmk],
-      getLineWidth: [hoveredTmk],
+      getLineColor: [hoveredTmk, selectedTmk],
+      getLineWidth: [hoveredTmk, selectedTmk],
     },
   });
 }
@@ -473,6 +641,48 @@ function wireUI() {
     }
     refresh();
   });
+
+  document.getElementById('min-assessed').addEventListener('input', (e) => {
+    STATE.minAssessed = +e.target.value;
+    refresh();
+  });
+  document.getElementById('min-tax').addEventListener('input', (e) => {
+    STATE.minTax = +e.target.value;
+    refresh();
+  });
+  document.getElementById('filter-reset').addEventListener('click', () => {
+    STATE.minAssessed = 0;
+    STATE.minTax = 0;
+    document.getElementById('min-assessed').value = 0;
+    document.getElementById('min-tax').value = 0;
+    refresh();
+  });
+}
+
+function updateFilterUI() {
+  const minAv = thresholdFor(STATE.minAssessed, STATE.assessedMax);
+  const minTx = thresholdFor(STATE.minTax,      STATE.taxMax);
+  const avEl = document.getElementById('min-assessed-val');
+  const txEl = document.getElementById('min-tax-val');
+  if (STATE.minAssessed === 0) {
+    avEl.textContent = 'Off';
+    avEl.classList.add('off');
+  } else {
+    avEl.textContent = '≥ ' + fmtUSDk(minAv);
+    avEl.classList.remove('off');
+  }
+  if (STATE.minTax === 0) {
+    txEl.textContent = 'Off';
+    txEl.classList.add('off');
+  } else {
+    txEl.textContent = '≥ ' + fmtUSDk(minTx);
+    txEl.classList.remove('off');
+  }
+  const active = STATE.minAssessed > 0 || STATE.minTax > 0;
+  document.getElementById('filter-reset').hidden = !active;
+  document.getElementById('filter-count').textContent = active
+    ? `${fmtInt.format(STATE.filtered.length)} parcels`
+    : '';
 }
 
 function selectStation(id) {
@@ -504,10 +714,19 @@ function fitToStation() {
 function refresh() {
   const colorKey = METRIC_KEYS[STATE.mode];
   const filterSid = STATE.stationId ? +STATE.stationId : null;
+  const minAv = thresholdFor(STATE.minAssessed, STATE.assessedMax);
+  const minTx = thresholdFor(STATE.minTax,      STATE.taxMax);
+
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
-    if (filterSid !== null
-        && !(f.properties?.station_ids || []).includes(filterSid)) return false;
-    return Number.isFinite(+f.properties?.[colorKey]);
+    const p = f.properties;
+    if (filterSid !== null && !(p?.station_ids || []).includes(filterSid)) return false;
+    if (!Number.isFinite(+p?.[colorKey])) return false;
+    if (minAv > 0 && !(+p?.assessed_value >= minAv)) return false;
+    if (minTx > 0) {
+      const tax = (+p?.rev_per_ac) * (+p?.area_ac);
+      if (!(tax >= minTx)) return false;
+    }
+    return true;
   });
 
   STATE.domain       = computeDomain(STATE.filtered, colorKey,    STATE.mode === 'net');
@@ -516,6 +735,7 @@ function refresh() {
   refreshLayer();
   renderLegend();
   renderSummary();
+  updateFilterUI();
 }
 
 function computeDomain(features, key, symmetric) {

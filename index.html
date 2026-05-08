@@ -42,6 +42,30 @@
   </section>
 
   <section class="control">
+    <label>Filters</label>
+    <div class="filter">
+      <div class="filter-head">
+        <span class="filter-name">Min assessed value</span>
+        <span class="filter-val" id="min-assessed-val">Off</span>
+      </div>
+      <input type="range" id="min-assessed" class="slider" min="0" max="100" step="1" value="0"
+        aria-label="Minimum assessed value">
+    </div>
+    <div class="filter">
+      <div class="filter-head">
+        <span class="filter-name">Min property tax</span>
+        <span class="filter-val" id="min-tax-val">Off</span>
+      </div>
+      <input type="range" id="min-tax" class="slider" min="0" max="100" step="1" value="0"
+        aria-label="Minimum annual property tax">
+    </div>
+    <div class="filter-meta">
+      <span id="filter-count" class="filter-count"></span>
+      <button id="filter-reset" class="filter-reset" hidden>Reset</button>
+    </div>
+  </section>
+
+  <section class="control">
     <div id="legend" class="legend"></div>
   </section>
 
@@ -59,6 +83,7 @@
 
 <div id="map"></div>
 <div id="parcel-tooltip" class="parcel-tooltip" hidden></div>
+<div id="parcel-popup" class="parcel-popup" hidden></div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"
