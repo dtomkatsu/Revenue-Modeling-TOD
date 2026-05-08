@@ -80,7 +80,7 @@ UTM_4N           = 32604
 HI_STATE_PLANE_3 = 2783        # US-survey-feet
 SQ_M_PER_AC      = 4046.8564224
 
-BUFFER_FT             = 5.0
+BUFFER_FT             = 50.0
 GUIDEWAY_BUFFER_FT    = 10.0
 GUIDEWAY_OVERLAP_FRAC = 0.5
 LANDLOCKED_FT         = 10.0

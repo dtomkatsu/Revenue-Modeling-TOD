@@ -1,0 +1,26 @@
+{
+  "output": "parcels_tod.geojson",
+  "source_url": "file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_revenue.geojson + file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_costs.geojson",
+  "row_count": 4830,
+  "script": "etl/08_emit_frontend_data.py",
+  "fetched_at": "2026-05-08T00:10:26+00:00",
+  "value_field": "assessed_value",
+  "class_field": null,
+  "rows_unmatched_cost": 0,
+  "crs": "EPSG:4326",
+  "stations_represented": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ]
+}

@@ -1,0 +1,20 @@
+{
+"type": "FeatureCollection",
+"name": "stations",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "id": 1, "name": "Kualakaʻi Station" }, "geometry": { "type": "Point", "coordinates": [ -158.05102398754201, 21.3455523406063 ] } },
+{ "type": "Feature", "properties": { "id": 2, "name": "Keoneʻae Station" }, "geometry": { "type": "Point", "coordinates": [ -158.051206328336008, 21.358511278419201 ] } },
+{ "type": "Feature", "properties": { "id": 3, "name": "Honouliuli Station" }, "geometry": { "type": "Point", "coordinates": [ -158.045281842756992, 21.3669266912792 ] } },
+{ "type": "Feature", "properties": { "id": 4, "name": "Hōʻaeʻae Station" }, "geometry": { "type": "Point", "coordinates": [ -158.022685593, 21.378161535932399 ] } },
+{ "type": "Feature", "properties": { "id": 5, "name": "Pouhala Station" }, "geometry": { "type": "Point", "coordinates": [ -158.003837507890012, 21.384072998117201 ] } },
+{ "type": "Feature", "properties": { "id": 6, "name": "Hālaulani Station" }, "geometry": { "type": "Point", "coordinates": [ -157.985626646486992, 21.3943086921707 ] } },
+{ "type": "Feature", "properties": { "id": 7, "name": "Waiawa Station" }, "geometry": { "type": "Point", "coordinates": [ -157.979915080122993, 21.3966524363227 ] } },
+{ "type": "Feature", "properties": { "id": 8, "name": "Kalauao Station" }, "geometry": { "type": "Point", "coordinates": [ -157.947115721221991, 21.3838612062439 ] } },
+{ "type": "Feature", "properties": { "id": 9, "name": "Hālawa Station" }, "geometry": { "type": "Point", "coordinates": [ -157.93384131173201, 21.371061646530499 ] } },
+{ "type": "Feature", "properties": { "id": 10, "name": "Makalapa Station" }, "geometry": { "type": "Point", "coordinates": [ -157.935375383065008, 21.352024849957001 ] } },
+{ "type": "Feature", "properties": { "id": 11, "name": "Lelepaua Station" }, "geometry": { "type": "Point", "coordinates": [ -157.920974014074005, 21.333762222632899 ] } },
+{ "type": "Feature", "properties": { "id": 12, "name": "Āhua Station" }, "geometry": { "type": "Point", "coordinates": [ -157.901404562186002, 21.332763347226901 ] } },
+{ "type": "Feature", "properties": { "id": 13, "name": "Kahauiki Station" }, "geometry": { "type": "Point", "coordinates": [ -157.888827186566999, 21.332725469382101 ] } }
+]
+}
