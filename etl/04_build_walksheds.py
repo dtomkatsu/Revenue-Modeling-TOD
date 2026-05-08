@@ -2,7 +2,7 @@
 
 Reads ``data/raw/rail_transit_station_points.geojson`` (fetched by step 01),
 filters to Segments 1+2 (the currently operating stations: IDs 1–13), buffers
-each station point by 0.5 mi (804.672 m) in EPSG:32604 (UTM Zone 4N) so the
+each station point by 1.0 mi (1609.344 m) in EPSG:32604 (UTM Zone 4N) so the
 buffer is in true meters, and reprojects the resulting polygons back to
 WGS84 for the output ``data/processed/walksheds.geojson``.
 
@@ -41,7 +41,7 @@ INPUT_PATH  = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojso
 OUTPUT_PATH = _ROOT / "data" / "processed" / "walksheds.geojson"
 
 # Half-mile buffer in meters (1 mi = 1609.344 m).
-BUFFER_METERS = 0.5 * 1609.344  # 804.672
+BUFFER_METERS = 1.0 * 1609.344  # 1609.344 m (1.0 mi)
 
 UTM_4N = 32604  # meters, true-area CRS for Oʻahu
 WGS84  = 4326
