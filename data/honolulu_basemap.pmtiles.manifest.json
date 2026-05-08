@@ -1,0 +1,12 @@
+{
+  "output": "honolulu_basemap.pmtiles",
+  "source_url": "https://download.geofabrik.de/north-america/us/hawaii-latest.osm.pbf",
+  "row_count": 0,
+  "script": "etl/09_build_basemap_tiles.py",
+  "fetched_at": "2026-05-08T06:49:06+00:00",
+  "osm_snapshot": null,
+  "planetiler_version": "0.10.2",
+  "byte_size": 22720418,
+  "bbox": "full-extract",
+  "schema": "openmaptiles"
+}
