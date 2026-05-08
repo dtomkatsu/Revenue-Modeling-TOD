@@ -74,6 +74,8 @@ VALUE_FIELD_CANDIDATES = (
     "total_assessed_value", "totalassessed", "assessed_value", "totalvalue",
 )
 CLASS_FIELD_CANDIDATES = (
+    "land_use",
+    "taxratecode", "taxrateclass", "tax_rate_code",
     "tax_class", "property_class", "class_code", "land_use_class",
     "rpa_class", "puc", "class",
 )
