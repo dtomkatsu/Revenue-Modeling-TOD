@@ -40,6 +40,7 @@ LAYERS: dict[str, str] = {
     "rail_transit_guideway_alignment_line": "cchnl::rail-transit-guideway-alignment-line",
     "land_use_oahu":                        "cchnl::2017_lud_oahu",
     "road_centerlines":                     "cchnl::centerlines_haw",
+    "address_points":                       "cchnl::address-points-1",
 }
 
 # BWS sewer/water — try a few likely slugs; published Honolulu BWS layers

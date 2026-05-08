@@ -143,7 +143,9 @@ function addLayers() {
     layout: { visibility: STATE.extrude ? 'none' : 'visible' },
     paint: {
       'fill-color': '#cccccc',
-      'fill-opacity': 0.85,
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 1.0, 0.85,
+      ],
     },
   });
 
@@ -154,13 +156,15 @@ function addLayers() {
     source: 'parcels',
     layout: { visibility: STATE.extrude ? 'none' : 'visible' },
     paint: {
-      'line-color': 'rgba(20,20,20,0.7)',
+      'line-color': [
+        'case', ['boolean', ['feature-state', 'hover'], false],
+        '#0ea5e9', 'rgba(20,20,20,0.7)',
+      ],
       'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        12, 0.3,
-        14, 0.7,
-        16, 1.2,
-        18, 1.8,
+        'case', ['boolean', ['feature-state', 'hover'], false],
+        3,
+        ['interpolate', ['linear'], ['zoom'],
+          12, 0.3, 14, 0.7, 16, 1.2, 18, 1.8],
       ],
     },
   });
@@ -173,9 +177,26 @@ function addLayers() {
     layout: { visibility: STATE.extrude ? 'visible' : 'none' },
     paint: {
       'fill-extrusion-color': '#cccccc',
-      'fill-extrusion-opacity': 0.85,
+      'fill-extrusion-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 1.0, 0.85,
+      ],
       'fill-extrusion-height': 0,
       'fill-extrusion-base': 0,
+    },
+  });
+
+  // Hover outline (3D mode) — drawn as a line on top so the highlighted
+  // parcel reads even with the bar color.
+  map.addLayer({
+    id: 'parcels-hover-outline',
+    type: 'line',
+    source: 'parcels',
+    paint: {
+      'line-color': '#0ea5e9',
+      'line-width': 3,
+      'line-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 1, 0,
+      ],
     },
   });
 
@@ -215,22 +236,40 @@ function addLayers() {
 
 function bindHoverPopup() {
   const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+  let hoveredTmk = null;
+
+  const setHover = (tmk) => {
+    if (hoveredTmk === tmk) return;
+    if (hoveredTmk !== null) {
+      map.setFeatureState({ source: 'parcels', id: hoveredTmk }, { hover: false });
+    }
+    hoveredTmk = tmk;
+    if (tmk !== null) {
+      map.setFeatureState({ source: 'parcels', id: tmk }, { hover: true });
+    }
+  };
 
   const show = (e) => {
     if (!e.features?.length) return;
     map.getCanvas().style.cursor = 'pointer';
-    const p = e.features[0].properties;
+    const f = e.features[0];
+    const p = f.properties;
+    setHover(p.tmk ?? null);
+    const addr = p.address && p.address !== 'null' ? p.address : null;
     const html = `
-      <div class="pp-title">${escapeHTML(p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
+      <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
+      ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
       <div class="pp-row"><span class="k">Revenue / ac</span><span>${fmtUSDk(+p.rev_per_ac)}</span></div>
       <div class="pp-row"><span class="k">Cost / ac</span><span>${fmtUSDk(+p.cost_per_ac)}</span></div>
       <div class="pp-row"><span class="k">Net / ac</span><span>${fmtUSDk(+p.net_per_ac)}</span></div>
       ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span>${(+p.area_ac).toFixed(2)}</span></div>` : ''}
+      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span>${escapeHTML(String(p.land_use))}</span></div>` : ''}
     `;
     popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
   };
   const hide = () => {
     map.getCanvas().style.cursor = '';
+    setHover(null);
     popup.remove();
   };
 

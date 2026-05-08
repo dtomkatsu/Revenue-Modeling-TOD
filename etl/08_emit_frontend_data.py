@@ -54,9 +54,10 @@ from common.manifest import read_manifest, write_manifest  # noqa: E402
 
 SCRIPT_NAME = "etl/08_emit_frontend_data.py"
 
-REVENUE_PATH  = _ROOT / "data" / "processed" / "parcels_revenue.geojson"
-COSTS_PATH    = _ROOT / "data" / "processed" / "parcels_costs.geojson"
-STATIONS_PATH = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojson"
+REVENUE_PATH   = _ROOT / "data" / "processed" / "parcels_revenue.geojson"
+COSTS_PATH     = _ROOT / "data" / "processed" / "parcels_costs.geojson"
+STATIONS_PATH  = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojson"
+ADDRESSES_PATH = _ROOT / "data" / "raw"       / "address_points.geojson"
 
 OUTPUT_PARCELS  = _ROOT / "data" / "parcels_tod.geojson"
 OUTPUT_STATIONS = _ROOT / "data" / "stations.geojson"
@@ -176,6 +177,37 @@ def emit_frontend(*, force: bool) -> int:
         print("[warn] no land-use class column found; land_use will be null")
         merged["land_use"] = None
 
+    # ---- Addresses (modal address per TMK from address_points layer) ----
+    address_by_tmk: dict[str, str] = {}
+    if ADDRESSES_PATH.exists():
+        print(f"[read] {ADDRESSES_PATH.relative_to(_ROOT)}")
+        addr = gpd.read_file(ADDRESSES_PATH)
+        # geocodeadd is the human-readable concatenated address; fall back to
+        # composing one from house number + street.
+        addr_cols = {c.lower(): c for c in addr.columns}
+        tmk_col   = addr_cols.get("tmk")
+        full_col  = addr_cols.get("geocodeadd") or addr_cols.get("full_number")
+        if tmk_col and full_col:
+            df = pd.DataFrame(addr[[tmk_col, full_col]]).dropna(subset=[tmk_col, full_col])
+            df.columns = ["tmk_raw", "address"]
+            df["tmk"] = df["tmk_raw"].astype(str).str.replace(r"\D", "", regex=True).str.zfill(8).str[-8:]
+            # If multiple addresses share a TMK, keep the most common (modal)
+            modal = df.groupby("tmk")["address"].agg(
+                lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[0]
+            )
+            address_by_tmk = modal.to_dict()
+            print(f"[addr]  joined {len(address_by_tmk)} unique TMK addresses")
+        else:
+            print(f"[warn] address_points has no tmk/geocodeadd cols; address omitted")
+    else:
+        print(f"[note] {ADDRESSES_PATH.name} not present; address omitted "
+              "(run `python etl/01_fetch_arcgis.py address_points` to fetch)")
+
+    merged_tmk_str = merged["tmk"].astype(str).str.zfill(8)
+    merged["address"] = merged_tmk_str.map(address_by_tmk).where(
+        lambda s: s.notna(), None
+    ).astype("object")
+
     merged["station_id"] = merged["STATION_ID"].astype(int)
     merged["net_per_ac"] = merged["rev_per_ac"] - merged["cost_per_ac"]
 
@@ -183,7 +215,7 @@ def emit_frontend(*, force: bool) -> int:
         "tmk", "station_id", "area_ac",
         "rev_per_ac", "cost_per_ac", "net_per_ac",
         "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
-        "assessed_value", "land_use", "landlocked",
+        "assessed_value", "land_use", "address", "landlocked",
         "geometry",
     ]
     out_parcels = merged[keep].copy()

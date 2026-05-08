@@ -212,7 +212,14 @@ select, button, input {
 
 .maplibregl-popup-content .pp-title {
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.maplibregl-popup-content .pp-sub {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 .maplibregl-popup-content .pp-row {
