@@ -169,7 +169,9 @@ function addLayers() {
     },
   });
 
-  // Parcel extrusion (3D) — visible by default.
+  // Parcel extrusion (3D) — visible by default. Note: fill-extrusion-opacity
+  // does not support feature-state, so hover feedback in 3D is via the
+  // parcels-hover-outline layer below instead.
   map.addLayer({
     id: 'parcels-extrude',
     type: 'fill-extrusion',
@@ -177,9 +179,7 @@ function addLayers() {
     layout: { visibility: STATE.extrude ? 'visible' : 'none' },
     paint: {
       'fill-extrusion-color': '#cccccc',
-      'fill-extrusion-opacity': [
-        'case', ['boolean', ['feature-state', 'hover'], false], 1.0, 0.85,
-      ],
+      'fill-extrusion-opacity': 0.85,
       'fill-extrusion-height': 0,
       'fill-extrusion-base': 0,
     },
