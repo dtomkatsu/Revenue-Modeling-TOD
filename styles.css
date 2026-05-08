@@ -140,11 +140,11 @@ select, button, input {
   display: flex;
   border: 1px solid var(--border);
   border-radius: 7px;
-  overflow: hidden;
   background: var(--c-slate);
 }
 
 .seg-btn {
+  position: relative;
   flex: 1;
   padding: 8px 4px;
   background: transparent;
@@ -157,7 +157,8 @@ select, button, input {
   transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
 
-.seg-btn:last-child { border-right: none; }
+.seg-btn:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.seg-btn:last-child  { border-top-right-radius: 6px; border-bottom-right-radius: 6px; border-right: none; }
 .seg-btn:hover {
   background: rgba(202, 210, 197, 0.06);
   opacity: 1;
@@ -167,6 +168,46 @@ select, button, input {
   color: var(--c-white);
   font-weight: 600;
   opacity: 1;
+}
+
+.seg-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--c-charcoal);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 11px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  z-index: 20;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.seg-btn[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--c-charcoal);
+  z-index: 21;
+  pointer-events: none;
+}
+
+.seg-caption {
+  font-size: 10.5px;
+  text-align: center;
+  margin-top: 6px;
+  color: var(--muted);
+  letter-spacing: 0.03em;
 }
 
 .check {

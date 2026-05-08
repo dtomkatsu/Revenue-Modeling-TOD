@@ -431,7 +431,6 @@ function handleHover({ object, x, y }) {
     refreshLayer();
   }
   if (object) {
-    map.getCanvas().style.cursor = 'pointer';
     tooltipEl.innerHTML = buildHTML(object.properties);
     // x,y are CSS pixels relative to the deck container (map element); map
     // bounding rect converts to viewport coords for the fixed tooltip.
@@ -440,7 +439,6 @@ function handleHover({ object, x, y }) {
     tooltipEl.style.top = (rect.top + y + 12) + 'px';
     tooltipEl.hidden = false;
   } else {
-    map.getCanvas().style.cursor = '';
     tooltipEl.hidden = true;
   }
 }

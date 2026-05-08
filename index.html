@@ -24,10 +24,14 @@
   <section class="control">
     <label>Metric</label>
     <div class="seg" id="mode-toggle" role="radiogroup">
-      <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true">Revenue / ac</button>
-      <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false">Cost / ac</button>
-      <button class="seg-btn" data-mode="net" role="radio" aria-checked="false">Net / ac</button>
+      <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true"
+        data-tooltip="Annual property tax revenue per acre. Assessed value × FY2026 millage rate by land-use class.">Revenue</button>
+      <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false"
+        data-tooltip="Annual infrastructure O&amp;M cost per acre — share of road, sewer, and water budgets attributed by parcel frontage.">Cost</button>
+      <button class="seg-btn" data-mode="net" role="radio" aria-checked="false"
+        data-tooltip="Revenue minus cost. Positive = the parcel pays more in tax than it costs the city to serve.">Net</button>
     </div>
+    <div class="seg-caption">all values per acre</div>
   </section>
 
   <section class="control">
