@@ -420,9 +420,11 @@ function buildPopupHTML(p) {
   const acres = +p.area_ac;
   const hasAcres = Number.isFinite(acres);
   // Annual dollar amounts derived from the per-acre rates × parcel area.
-  const annualRev  = hasAcres && Number.isFinite(+p.rev_per_ac)  ? +p.rev_per_ac  * acres : NaN;
-  const annualCost = hasAcres && Number.isFinite(+p.cost_per_ac) ? +p.cost_per_ac * acres : NaN;
-  const annualNet  = hasAcres && Number.isFinite(+p.net_per_ac)  ? +p.net_per_ac  * acres : NaN;
+  const annualRev    = hasAcres && Number.isFinite(+p.rev_per_ac)     ? +p.rev_per_ac     * acres : NaN;
+  const annualCostOM = hasAcres && Number.isFinite(+p.cost_om_per_ac) ? +p.cost_om_per_ac * acres : NaN;
+  const annualCIP    = hasAcres && Number.isFinite(+p.cip_per_ac)     ? +p.cip_per_ac     * acres : NaN;
+  const annualCost   = hasAcres && Number.isFinite(+p.cost_per_ac)    ? +p.cost_per_ac    * acres : NaN;
+  const annualNet    = hasAcres && Number.isFinite(+p.net_per_ac)     ? +p.net_per_ac     * acres : NaN;
   const netPosClass = (n) => Number.isFinite(n) ? (n >= 0 ? ' net-pos' : ' net-neg') : '';
   const subParts = [];
   if (p.tmk)      subParts.push(`TMK ${escapeHTML(String(p.tmk))}`);
@@ -440,13 +442,17 @@ function buildPopupHTML(p) {
       <h3>Assessment ${yearBadgeHTML}</h3>
       <div class="parcel-popup__row"><span class="k">Assessed value</span><span class="v">${fmtUSDk(+p.assessed_value)}</span></div>
       <div class="parcel-popup__row"><span class="k">Property tax</span><span class="v">${fmtUSDk(annualRev)}</span></div>
-      <div class="parcel-popup__row"><span class="k">Infrastructure cost</span><span class="v">${fmtUSDk(annualCost)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Operating cost (O&amp;M)</span><span class="v">${fmtUSDk(annualCostOM)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Capital cost (CIP)</span><span class="v">${fmtUSDk(annualCIP)}</span></div>
+      <div class="parcel-popup__row"><span class="k">Total infra cost</span><span class="v">${fmtUSDk(annualCost)}</span></div>
       <div class="parcel-popup__row"><span class="k">Net</span><span class="v${netPosClass(annualNet)}">${fmtUSDk(annualNet)}</span></div>
     </div>
 
     <div class="parcel-popup__section">
       <h3>Per acre ${yearBadgeHTML}</h3>
       <div class="parcel-popup__row"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+      <div class="parcel-popup__row"><span class="k">O&amp;M / ac</span><span class="v">${fmtUSDk(+p.cost_om_per_ac)}</span></div>
+      <div class="parcel-popup__row"><span class="k">CIP / ac</span><span class="v">${fmtUSDk(+p.cip_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">Net / ac</span><span class="v${netPosClass(+p.net_per_ac)}">${fmtUSDk(+p.net_per_ac)}</span></div>
     </div>
@@ -672,7 +678,7 @@ function wireUI() {
 // actually shows. Keeps technical jargon out — plain English.
 const SEG_CAPTIONS = {
   revenue: 'Annual <strong>property tax paid</strong> by the parcel, per acre.',
-  cost:    'Annual <strong>cost to the city</strong> for road, water, and sewer service, per acre.',
+  cost:    'Annual <strong>cost to the city</strong> for road, water, and sewer service per acre — operating and capital combined.',
   net:     '<strong>Revenue minus cost</strong>, per acre. Green pays for itself; red is a net loss.',
 };
 
