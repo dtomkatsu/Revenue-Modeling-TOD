@@ -1,7 +1,10 @@
 // Skyline TOD revenue/cost map.
 // Loads data/parcels_tod.geojson + data/stations.geojson, renders parcels colored
 // by revenue_per_ac / cost_per_ac / net_per_ac, and supports per-station filtering
-// + 3D extrusion.
+// + 3D extrusion. Parcels are rendered via deck.gl GeoJsonLayer (interleaved
+// with the MapLibre canvas) so the hover tooltip can be a DOM element placed
+// at cursor pixels — avoiding the occlusion you'd get with a centroid-anchored
+// MapLibre Popup behind a tall extruded bar.
 
 const VIRIDIS = [
   '#440154', '#482878', '#3e4989', '#31688e',
@@ -54,6 +57,9 @@ const fmtUSDk = (n) => {
 };
 const fmtInt = new Intl.NumberFormat('en-US');
 
+let hoveredTmk = null;
+const tooltipEl = document.getElementById('parcel-tooltip');
+
 // Register the pmtiles:// protocol so MapLibre can fetch tile ranges out of
 // our self-hosted single-file Hawaii basemap (data/honolulu_basemap.pmtiles).
 // Must run BEFORE `new maplibregl.Map()` constructs the source.
@@ -98,6 +104,26 @@ map.on('style.load', () => {
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
+
+// interleaved:true lets deck.gl share the MapLibre canvas, so we get pickable
+// 3D parcels alongside the raster basemap with one composited render.
+const overlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
+map.addControl(overlay);
+
+// onHover fires with object:null on most off-parcel moves, but a fast mouse
+// leave that skips empty map (e.g. straight onto the sidebar) can leave the
+// tooltip stuck — bind mouseleave on the container to clear it. Bound to the
+// outer container, NOT the canvas: the canvas is a sibling of overlay layers,
+// so cursor-onto-overlay would fire canvas.mouseleave and create a flicker
+// loop. The container wraps everything, so mouseleave fires only on a
+// genuine map exit.
+map.getContainer().addEventListener('mouseleave', () => {
+  if (hoveredTmk !== null) {
+    hoveredTmk = null;
+    refreshLayer();
+  }
+  tooltipEl.hidden = true;
+});
 
 map.on('load', async () => {
   try {
@@ -229,70 +255,12 @@ function populateStationDropdown(stations) {
 }
 
 function addLayers() {
+  // Source kept around even though parcels render via deck.gl — station
+  // markers and the rail ribbon still consume the MapLibre source pipeline,
+  // and a same-named source/layer pair is convenient for future MapLibre
+  // overlays (e.g. parcel labels at high zoom).
   map.addSource('parcels', { type: 'geojson', data: STATE.parcels, promoteId: 'tmk' });
   map.addSource('stations', { type: 'geojson', data: STATE.stations });
-
-  // Parcel fill (2D) — hidden by default since 3D is on.
-  map.addLayer({
-    id: 'parcels-fill',
-    type: 'fill',
-    source: 'parcels',
-    layout: { visibility: STATE.extrude ? 'none' : 'visible' },
-    paint: {
-      'fill-color': '#cccccc',
-      'fill-opacity': [
-        'case', ['boolean', ['feature-state', 'hover'], false], 1.0, 0.85,
-      ],
-    },
-  });
-
-  // Parcel outline (separate layer so we can set stroke width). zoom must
-  // be at the top level of any zoom expression (per maplibre style spec) —
-  // wrap interpolate around case, not the other way around.
-  map.addLayer({
-    id: 'parcels-outline',
-    type: 'line',
-    source: 'parcels',
-    layout: { visibility: STATE.extrude ? 'none' : 'visible' },
-    paint: {
-      'line-color': [
-        'case', ['boolean', ['feature-state', 'hover'], false],
-        '#0ea5e9', 'rgba(20,20,20,0.7)',
-      ],
-      'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        12, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 0.3],
-        14, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 0.7],
-        16, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 1.2],
-        18, ['case', ['boolean', ['feature-state', 'hover'], false], 3, 1.8],
-      ],
-      'line-color-transition': { duration: 0 },
-      'line-width-transition': { duration: 0 },
-    },
-  });
-
-  // Parcel extrusion (3D) — visible by default. fill-extrusion-opacity does
-  // not support feature-state, but fill-extrusion-color does — applyPaint()
-  // wraps the color in a hover case so the hovered bar lights up cyan.
-  map.addLayer({
-    id: 'parcels-extrude',
-    type: 'fill-extrusion',
-    source: 'parcels',
-    layout: { visibility: STATE.extrude ? 'visible' : 'none' },
-    paint: {
-      'fill-extrusion-color': '#cccccc',
-      // Disable the default 300ms color/opacity transitions. With a 'case'
-      // expression flipping between an interpolate color (non-hover) and a
-      // constant cyan (hover), MapLibre's intermediate-frame eval of the
-      // transition produces a visible flash on every cursor move. Issue
-      // ref: mapbox/mapbox-gl-js#6617. Instant swap = no flicker.
-      'fill-extrusion-color-transition':   { duration: 0 },
-      'fill-extrusion-opacity-transition': { duration: 0 },
-      'fill-extrusion-opacity': 0.85,
-      'fill-extrusion-height': 0,
-      'fill-extrusion-base': 0,
-    },
-  });
 
   // Skyline guideway as a translucent cyan ribbon. Real-world viaduct sits
   // ~30 ft (9 m) above ground, but our parcel extrusions are scaled to a
@@ -317,24 +285,6 @@ function addLayers() {
       'fill-color': '#06b6d4',
       'fill-opacity': 0.32,
       'fill-antialias': false,
-    },
-  });
-
-  // Ground-level outline of the hovered parcel — visible in both 2D and 3D
-  // (in 3D it shows up as a ring at the base of the lit-up bar). Same
-  // expression-vs-constant issue (mapbox-gl-js#6617) as the extrude color:
-  // disable transition or the fade-in from 0→1 produces a visible flash.
-  map.addLayer({
-    id: 'parcels-hover-outline',
-    type: 'line',
-    source: 'parcels',
-    paint: {
-      'line-color': '#0ea5e9',
-      'line-width': 3,
-      'line-opacity': [
-        'case', ['boolean', ['feature-state', 'hover'], false], 1, 0,
-      ],
-      'line-opacity-transition': { duration: 0 },
     },
   });
 
@@ -380,100 +330,119 @@ function addLayers() {
       .setLngLat(f.geometry.coordinates)
       .addTo(map);
   }
-
-  bindHoverPopup();
 }
 
-function bindHoverPopup() {
-  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
-  let hoveredTmk = null;
-  let lastPopupTmk = null;
+function buildHTML(p) {
+  const addr = p.address && p.address !== 'null' ? p.address : null;
+  const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
+  return `
+    <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
+    ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
+    <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
+    <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
+    <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
+    ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
+    ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
+  `;
+}
 
-  const setHover = (tmk) => {
-    if (hoveredTmk === tmk) return;
-    if (hoveredTmk !== null) {
-      map.setFeatureState({ source: 'parcels', id: hoveredTmk }, { hover: false });
-    }
-    hoveredTmk = tmk;
-    if (tmk !== null) {
-      map.setFeatureState({ source: 'parcels', id: tmk }, { hover: true });
-    }
-  };
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
 
-  // Cheap polygon centroid (mean of first ring) — close enough for anchoring.
-  const featureCentroid = (geom) => {
-    const ring = geom.type === 'Polygon'
-      ? geom.coordinates[0]
-      : geom.coordinates[0][0];
-    let cx = 0, cy = 0;
-    for (const [x, y] of ring) { cx += x; cy += y; }
-    return [cx / ring.length, cy / ring.length];
-  };
+// Linear-interpolate a value's color from an evenly-spaced palette in [lo, hi].
+// JS port of the maplibre `['interpolate', ['linear'], ...rampStops]` we used
+// to drive parcels-extrude / parcels-fill paint.
+function interpolateColor(value, lo, hi, palette) {
+  if (!Number.isFinite(value)) return [200, 200, 200];
+  const n = palette.length;
+  const span = hi - lo || 1;
+  const t = Math.max(0, Math.min(1, (value - lo) / span));
+  const idx = t * (n - 1);
+  const i0 = Math.floor(idx);
+  const i1 = Math.min(n - 1, i0 + 1);
+  const frac = idx - i0;
+  const c0 = hexToRgb(palette[i0]);
+  const c1 = hexToRgb(palette[i1]);
+  return [
+    Math.round(c0[0] + (c1[0] - c0[0]) * frac),
+    Math.round(c0[1] + (c1[1] - c0[1]) * frac),
+    Math.round(c0[2] + (c1[2] - c0[2]) * frac),
+  ];
+}
 
-  const buildHTML = (p) => {
-    const addr = p.address && p.address !== 'null' ? p.address : null;
-    const primaryClass = (m) => `pp-row${STATE.mode === m ? ' primary' : ''}`;
-    return `
-      <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
-      ${addr ? `<div class="pp-sub">TMK ${escapeHTML(p.tmk ?? '')}</div>` : ''}
-      <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
-      <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
-      <div class="${primaryClass('net')}"><span class="k">Net / ac</span><span class="v">${fmtUSDk(+p.net_per_ac)}</span></div>
-      ${p.area_ac ? `<div class="pp-row"><span class="k">Acres</span><span class="v">${(+p.area_ac).toFixed(2)}</span></div>` : ''}
-      ${p.land_use ? `<div class="pp-row"><span class="k">Class</span><span class="v">${escapeHTML(String(p.land_use))}</span></div>` : ''}
-    `;
-  };
+function buildParcelLayer() {
+  const colorKey = METRIC_KEYS[STATE.mode];
+  const [lo, hi] = STATE.domain;
+  const palette = STATE.mode === 'net' ? DIVERGING_RWG : VIRIDIS;
+  // Sqrt-scale heights against 98th-pct peak so low-revenue bars still
+  // register and outliers don't blow past HEIGHT_PEAK_M.
+  const peak = Math.max(Math.abs(STATE.heightDomain[0]),
+                        Math.abs(STATE.heightDomain[1])) || 1;
+  const HEIGHT_PEAK_M = 500;
+  const MIN_HEIGHT_M = 10;
+  const scale = HEIGHT_PEAK_M / Math.sqrt(peak);
 
-  const clearHover = () => {
-    setHover(null);
-    lastPopupTmk = null;
-    popup.remove();
-    map.getCanvas().style.cursor = '';
-  };
+  return new deck.GeoJsonLayer({
+    id: 'parcels',
+    data: STATE.filtered,
+    pickable: true,
+    stroked: true,
+    filled: true,
+    extruded: STATE.extrude,
+    lineWidthUnits: 'pixels',
+    getFillColor: (f) => {
+      if (f.properties.tmk === hoveredTmk) return [14, 165, 233, 230];
+      const v = +f.properties[colorKey];
+      const [r, g, b] = interpolateColor(v, lo, hi, palette);
+      return [r, g, b, 217];
+    },
+    getElevation: (f) => {
+      const v = Math.abs(+f.properties[HEIGHT_KEY]);
+      if (!Number.isFinite(v)) return MIN_HEIGHT_M;
+      return Math.max(MIN_HEIGHT_M, scale * Math.sqrt(Math.min(peak, v)));
+    },
+    getLineColor: (f) =>
+      f.properties.tmk === hoveredTmk ? [14, 165, 233, 255] : [40, 50, 55, 200],
+    getLineWidth: (f) => (f.properties.tmk === hoveredTmk ? 3 : 1),
+    onHover: handleHover,
+    updateTriggers: {
+      getFillColor: [STATE.mode, lo, hi, hoveredTmk],
+      getElevation: [STATE.heightDomain[0], STATE.heightDomain[1], STATE.extrude],
+      getLineColor: [hoveredTmk],
+      getLineWidth: [hoveredTmk],
+    },
+  });
+}
 
-  // Layer-scoped mousemove: maplibre's internal hit-testing for fill-
-  // extrusion correctly handles the rendered top face in pitched 3D, so
-  // this fires when the cursor is visually on a parcel bar — much better
-  // hover-area coverage than queryRenderedFeatures with a bbox.
-  //
-  // The original problem with this approach was flicker: pixel-level
-  // gaps in fill-extrusion rendering caused rapid mouseenter/mouseleave
-  // cycles that toggled hover off/on. Fix here: don't tie the hover
-  // CLEAR to mouseleave at all. Hover only clears when the cursor:
-  //   1. enters a *different* parcel (mousemove with a new TMK), or
-  //   2. leaves the canvas entirely (handled below)
-  // Trade-off: hover/popup persists even when cursor moves to a large
-  // basemap area (e.g., ocean). Acceptable — the user sees a clear
-  // visual cue (cyan-highlighted parcel) and can dismiss by hovering
-  // any other parcel or moving cursor off the map.
-  for (const id of ['parcels-fill', 'parcels-extrude']) {
-    map.on('mousemove', id, (e) => {
-      if (!e.features?.length) return;
-      let f = e.features[0];
-      if (hoveredTmk != null) {
-        const stick = e.features.find((c) => c.properties.tmk === hoveredTmk);
-        if (stick) f = stick;
-      }
-      const tmk = f.properties.tmk ?? null;
-      if (tmk === hoveredTmk) return;
-      setHover(tmk);
-      map.getCanvas().style.cursor = 'pointer';
-      if (tmk !== lastPopupTmk) {
-        popup.setLngLat(featureCentroid(f.geometry));
-        popup.setHTML(buildHTML(f.properties));
-        lastPopupTmk = tmk;
-      }
-      if (!popup.isOpen()) popup.addTo(map);
-    });
+function refreshLayer() {
+  overlay.setProps({ layers: [buildParcelLayer()] });
+}
+
+function handleHover({ object, x, y }) {
+  const newTmk = object?.properties?.tmk ?? null;
+  if (newTmk !== hoveredTmk) {
+    hoveredTmk = newTmk;
+    refreshLayer();
   }
-
-  // Cursor leaves the map area entirely (e.g., into the sidebar). Bound to
-  // the outer container, NOT the canvas: the canvas is a sibling of popups
-  // and markers, so cursor moving onto the popup fires canvas.mouseleave
-  // → clearHover → popup vanishes → mouse over canvas → re-add popup →
-  // infinite flicker. The container wraps canvas + popup + markers, so
-  // mouseleave on it only fires on a genuine map exit.
-  map.getContainer().addEventListener('mouseleave', clearHover);
+  if (object) {
+    map.getCanvas().style.cursor = 'pointer';
+    tooltipEl.innerHTML = buildHTML(object.properties);
+    // x,y are CSS pixels relative to the deck container (map element); map
+    // bounding rect converts to viewport coords for the fixed tooltip.
+    const rect = map.getContainer().getBoundingClientRect();
+    tooltipEl.style.left = (rect.left + x + 14) + 'px';
+    tooltipEl.style.top = (rect.top + y + 12) + 'px';
+    tooltipEl.hidden = false;
+  } else {
+    map.getCanvas().style.cursor = '';
+    tooltipEl.hidden = true;
+  }
 }
 
 function wireUI() {
@@ -494,10 +463,7 @@ function wireUI() {
 
   document.getElementById('extrude-toggle').addEventListener('change', (e) => {
     STATE.extrude = e.target.checked;
-    map.setLayoutProperty('parcels-fill',     'visibility', STATE.extrude ? 'none' : 'visible');
-    map.setLayoutProperty('parcels-outline',  'visibility', STATE.extrude ? 'none' : 'visible');
-    map.setLayoutProperty('parcels-extrude',  'visibility', STATE.extrude ? 'visible' : 'none');
-    map.setLayoutProperty('rail-line-xray',   'visibility', STATE.extrude ? 'visible' : 'none');
+    map.setLayoutProperty('rail-line-xray', 'visibility', STATE.extrude ? 'visible' : 'none');
     if (STATE.extrude) {
       // 3D needs both pitch and zoom to be visible — pitch up to near max,
       // zoom in enough that 30–1500m bars register as buildings.
@@ -515,16 +481,8 @@ function selectStation(id) {
   STATE.stationId = id || '';
   const sel = document.getElementById('station-select');
   if (sel.value !== STATE.stationId) sel.value = STATE.stationId;
-
-  // Station filter: parcels carry a station_ids array (one entry per
-  // walkshed they fall in). 'in' tests membership of the selected station's
-  // numeric id within that array.
-  const filter = STATE.stationId
-    ? ['in', ['to-number', STATE.stationId], ['get', 'station_ids']]
-    : null;
-  map.setFilter('parcels-fill', filter);
-  map.setFilter('parcels-extrude', filter);
-
+  // Station filter is applied JS-side in refresh() against STATE.filtered —
+  // the deck.gl layer just renders whatever's in that array.
   fitToStation();
   refresh();
 }
@@ -557,7 +515,7 @@ function refresh() {
   STATE.domain       = computeDomain(STATE.filtered, colorKey,    STATE.mode === 'net');
   STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY,  false);
 
-  applyPaint();
+  refreshLayer();
   renderLegend();
   renderSummary();
 }
@@ -585,48 +543,6 @@ function computeDomain(features, key, symmetric) {
   }
   if (lo === hi) hi = lo + 1;
   return [lo, hi];
-}
-
-function applyPaint() {
-  const key = METRIC_KEYS[STATE.mode];
-  const [lo, hi] = STATE.domain;
-  const palette = STATE.mode === 'net' ? DIVERGING_RWG : VIRIDIS;
-  const colorExpr = ['interpolate', ['linear'], ['to-number', ['get', key]],
-    ...rampStops(lo, hi, palette)];
-
-  if (STATE.extrude) {
-    // fill-extrusion-color supports feature-state — swap to cyan on hover so
-    // the lit-up bar reads even when looking down the corridor in 3D.
-    map.setPaintProperty('parcels-extrude', 'fill-extrusion-color', [
-      'case', ['boolean', ['feature-state', 'hover'], false], '#0ea5e9', colorExpr,
-    ]);
-    // Height is always revenue/ac (Urban3 convention: tall = productive).
-    // Sqrt scaling against the 98th-percentile peak so low-revenue parcels
-    // still have visible bars; 10m floor so non-zero values register at z14.
-    const peak = Math.max(Math.abs(STATE.heightDomain[0]),
-                          Math.abs(STATE.heightDomain[1])) || 1;
-    const HEIGHT_PEAK_M = 500;
-    const MIN_HEIGHT_M  = 10;
-    const scale = HEIGHT_PEAK_M / Math.sqrt(peak);
-    // Clamp input to peak before sqrt so outliers never exceed HEIGHT_PEAK_M.
-    map.setPaintProperty('parcels-extrude', 'fill-extrusion-height', [
-      'max',
-      MIN_HEIGHT_M,
-      ['*', scale, ['sqrt', ['min', peak, ['abs', ['to-number', ['get', HEIGHT_KEY]]]]]],
-    ]);
-  } else {
-    map.setPaintProperty('parcels-fill', 'fill-color', colorExpr);
-  }
-}
-
-function rampStops(lo, hi, palette) {
-  const stops = [];
-  const n = palette.length;
-  for (let i = 0; i < n; i++) {
-    const t = n === 1 ? 0 : i / (n - 1);
-    stops.push(lo + (hi - lo) * t, palette[i]);
-  }
-  return stops;
 }
 
 function renderLegend() {

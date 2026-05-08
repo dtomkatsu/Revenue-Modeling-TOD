@@ -382,11 +382,16 @@ select, button, input {
 }
 #map.ready { opacity: 1; }
 
-/* Parcel hover popup — same dark theme as the sidebar so the two read as
+/* Parcel hover tooltip — same dark theme as the sidebar so the two read as
    one design system. Border tinted with the teal accent to feel related
-   to the active states in the panel. The popup tip (CSS triangle drawn
-   by MapLibre) is repainted to match. */
-.maplibregl-popup-content {
+   to the active states in the panel. Positioned via JS at cursor pixels
+   (deck.gl onHover, see script.js handleHover) — fixed positioning so a
+   non-positioned ancestor can't shift it; pointer-events:none so the
+   tooltip never intercepts the hover that's keeping it on screen. */
+.parcel-tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 10;
   font: inherit;
   font-size: 12px;
   padding: 11px 13px 10px;
@@ -400,10 +405,9 @@ select, button, input {
   min-width: 180px;
 }
 
-/* Recolor the popup tip arrows so they match the dark popup body. */
-.maplibregl-popup-tip { display: none; }  /* default white tip clashes; hide */
+.parcel-tooltip[hidden] { display: none; }
 
-.maplibregl-popup-content .pp-title {
+.parcel-tooltip .pp-title {
   font-weight: 700;
   font-size: 13px;
   color: var(--c-white);
@@ -411,7 +415,7 @@ select, button, input {
   letter-spacing: -0.005em;
 }
 
-.maplibregl-popup-content .pp-sub {
+.parcel-tooltip .pp-sub {
   color: var(--muted);
   font-size: 11px;
   margin-bottom: 8px;
@@ -420,7 +424,7 @@ select, button, input {
   font-variant-numeric: tabular-nums;
 }
 
-.maplibregl-popup-content .pp-row {
+.parcel-tooltip .pp-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -429,17 +433,17 @@ select, button, input {
   padding: 2px 0;
 }
 
-.maplibregl-popup-content .pp-row .k {
+.parcel-tooltip .pp-row .k {
   color: var(--muted);
   font-size: 11px;
 }
-.maplibregl-popup-content .pp-row .v {
+.parcel-tooltip .pp-row .v {
   font-weight: 600;
   color: var(--c-ash);
 }
 /* Highlight the leading numeric row (typically rev/ac or net/ac) so a
    quick glance pulls the eye to the main value. */
-.maplibregl-popup-content .pp-row.primary .v {
+.parcel-tooltip .pp-row.primary .v {
   color: var(--c-teal);
   font-weight: 700;
 }
