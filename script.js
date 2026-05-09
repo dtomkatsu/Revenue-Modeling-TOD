@@ -30,6 +30,28 @@ const METRIC_LABELS = {
   net: 'Net / ac',
 };
 
+// Property-type buckets. Apartment is split out as Multi-family because its
+// economic profile (revenue-dense per acre, comparable to Hotel/Resort under
+// Honolulu RPAD) differs sharply from single-family Residential. Public
+// Service is split from Other so the filter can default-off Public Service
+// (those parcels pay $0 property tax and dominate red-net rendering).
+const LAND_USE_BUCKETS = {
+  Residential:    ['Residential', 'Residential A'],
+  'Multi-family': ['Apartment'],
+  Commercial:     ['Commercial', 'Hotel and Resort'],
+  Industrial:     ['Industrial'],
+  Other:          ['Agricultural', 'Preservation'],
+  PublicService:  ['Public Service'],
+};
+const LAND_USE_TO_BUCKET = (() => {
+  const m = {};
+  for (const [bucket, classes] of Object.entries(LAND_USE_BUCKETS)) {
+    for (const c of classes) m[c] = bucket;
+  }
+  return m;
+})();
+const DEFAULT_TYPE_SELECTIONS = ['Residential','Multi-family','Commercial','Industrial','Other'];
+
 const STATE = {
   mode: 'revenue',
   extrude: true,
@@ -40,13 +62,16 @@ const STATE = {
   filtered: [],         // currently visible parcel features
   domain: [0, 1],       // [min, max] of color metric (98th-pct clipped)
   heightDomain: [0, 1], // [min, max] of rev_per_ac across visible parcels
-  // Slider positions 0–100. 0 means filter is off; values map to a dollar
-  // threshold via STATE.{assessedMax,taxMax} (99th-pct of the data so the
-  // sliders aren't dominated by outliers).
-  minAssessed: 0,
-  minTax: 0,
+  // Range-filter positions 0–100. [0,100] means no filter applied; position
+  // 100 on the upper thumb means "no max" (Infinity) so users don't lop off
+  // the top 1% (assessedMax/taxMax are 99th-pct, not absolute max).
+  assessedRange: [0, 100],
+  taxRange:      [0, 100],
   assessedMax: 0,       // 99th-pct of assessed_value across all parcels
   taxMax: 0,            // 99th-pct of (rev_per_ac × area_ac)
+  typeSelections: new Set(DEFAULT_TYPE_SELECTIONS),
+  addressIndex: null,   // Map<normalizedAddress, Feature[]>
+  sidebarCollapsed: false,
 };
 
 // Height is ALWAYS revenue per acre (Urban3 convention: bar height = parcel
@@ -156,6 +181,7 @@ map.on('load', async () => {
 
     populateStationDropdown(stations);
     computeFilterMaxes(parcels.features);
+    buildAddressIndex();
     addLayers();
     wireUI();
     refresh();
@@ -284,9 +310,16 @@ function computeFilterMaxes(features) {
   STATE.taxMax      = pct99(taxes);
 }
 
-// Slider position (0–100) → dollar threshold. 0 means the filter is off.
-function thresholdFor(pct, max) {
-  return pct === 0 ? 0 : (pct / 100) * max;
+// Range-slider [lo, hi] (0–100 each) → [loDollars, hiDollarsOrInfinity].
+// Position 100 on the upper thumb maps to Infinity so users don't lose the
+// long tail (the visual max anchors at the 99th percentile, not the absolute
+// max). Lower 0 maps to 0; lower 100 would map to max but is normally
+// constrained by the upper thumb so it doesn't hit Infinity.
+function thresholdRange(range, max) {
+  const [lo, hi] = range;
+  const loDollars = lo === 0 ? 0 : (lo / 100) * max;
+  const hiDollars = hi >= 100 ? Infinity : (hi / 100) * max;
+  return [loDollars, hiDollars];
 }
 
 function populateStationDropdown(stations) {
@@ -656,20 +689,420 @@ function wireUI() {
     refresh();
   });
 
-  document.getElementById('min-assessed').addEventListener('input', (e) => {
-    STATE.minAssessed = +e.target.value;
-    refresh();
+  wireRangeFilter('assessed', 'assessedRange');
+  wireRangeFilter('tax',      'taxRange');
+
+  // Property-type checkboxes — each maps to a bucket key in
+  // STATE.typeSelections (a Set). Public Service starts unchecked per the
+  // asymmetric default; reset restores DEFAULT_TYPE_SELECTIONS.
+  document.querySelectorAll('.type-check input[type=checkbox]').forEach((cb) => {
+    const bucket = cb.dataset.bucket;
+    cb.addEventListener('change', () => {
+      if (cb.checked) STATE.typeSelections.add(bucket);
+      else            STATE.typeSelections.delete(bucket);
+      refresh();
+    });
   });
-  document.getElementById('min-tax').addEventListener('input', (e) => {
-    STATE.minTax = +e.target.value;
-    refresh();
-  });
+
   document.getElementById('filter-reset').addEventListener('click', () => {
-    STATE.minAssessed = 0;
-    STATE.minTax = 0;
-    document.getElementById('min-assessed').value = 0;
-    document.getElementById('min-tax').value = 0;
+    STATE.assessedRange = [0, 100];
+    STATE.taxRange      = [0, 100];
+    document.getElementById('assessed-min').value       = 0;
+    document.getElementById('assessed-max-input').value = 100;
+    document.getElementById('tax-min').value            = 0;
+    document.getElementById('tax-max-input').value      = 100;
+    STATE.typeSelections = new Set(DEFAULT_TYPE_SELECTIONS);
+    document.querySelectorAll('.type-check input[type=checkbox]').forEach((cb) => {
+      cb.checked = STATE.typeSelections.has(cb.dataset.bucket);
+    });
     refresh();
+  });
+
+  wireSidebarToggle();
+  wireSidebarResize();
+  wireAddressSearch();
+  wireSummaryTooltips();
+}
+
+// Dual-thumb range input wiring. The two inputs occupy the same screen space;
+// JS enforces lo ≤ hi by clamping the just-touched thumb against its
+// counterpart, and bumps the active thumb's z-index so it stays draggable
+// when both thumbs collide at 0/0 or 100/100.
+function wireRangeFilter(prefix, stateKey) {
+  const minEl = document.getElementById(`${prefix}-min`);
+  const maxEl = document.getElementById(`${prefix}-max-input`);
+
+  function bumpZ(active) {
+    minEl.style.zIndex = active === minEl ? 3 : 2;
+    maxEl.style.zIndex = active === maxEl ? 3 : 2;
+  }
+
+  minEl.addEventListener('input', () => {
+    let lo = +minEl.value;
+    const hi = +maxEl.value;
+    if (lo > hi) { lo = hi; minEl.value = lo; }
+    STATE[stateKey] = [lo, hi];
+    bumpZ(minEl);
+    refresh();
+  });
+  maxEl.addEventListener('input', () => {
+    const lo = +minEl.value;
+    let hi = +maxEl.value;
+    if (hi < lo) { hi = lo; maxEl.value = hi; }
+    STATE[stateKey] = [lo, hi];
+    bumpZ(maxEl);
+    refresh();
+  });
+}
+
+// localStorage helpers — Safari denies on file:// origins. Wrap every
+// access; degrade silently to defaults so the page keeps working.
+function loadPref(key, fallback) {
+  try {
+    const v = window.localStorage.getItem(`tod.${key}`);
+    if (v === null) return fallback;
+    return JSON.parse(v);
+  } catch (_) {
+    return fallback;
+  }
+}
+function savePref(key, val) {
+  try { window.localStorage.setItem(`tod.${key}`, JSON.stringify(val)); }
+  catch (_) { /* swallow */ }
+}
+
+function wireSidebarToggle() {
+  const btn = document.getElementById('sidebar-toggle');
+  const setCollapsed = (val) => {
+    STATE.sidebarCollapsed = !!val;
+    document.body.classList.toggle('sidebar-collapsed', !!val);
+    btn.setAttribute('aria-label', val ? 'Expand sidebar' : 'Collapse sidebar');
+    btn.title = val ? 'Expand sidebar' : 'Collapse sidebar';
+    requestAnimationFrame(() => { try { map.resize(); } catch (_) {} });
+    savePref('sidebarCollapsed', !!val);
+  };
+  btn.addEventListener('click', () => setCollapsed(!STATE.sidebarCollapsed));
+  // Restore collapsed state from a previous session.
+  if (loadPref('sidebarCollapsed', false)) setCollapsed(true);
+}
+
+function wireSidebarResize() {
+  const handle = document.getElementById('sidebar-resize');
+  if (!handle) return;
+  // Restore previous width before first paint to avoid layout flash.
+  const stored = loadPref('sidebarWidth', null);
+  if (typeof stored === 'number' &&
+      stored >= 280 && stored <= 600) {
+    document.documentElement.style.setProperty('--sidebar-w', stored + 'px');
+  }
+
+  let dragging = false;
+  let pendingWidth = null;
+  let rafQueued = false;
+
+  function applyPending() {
+    rafQueued = false;
+    if (pendingWidth !== null) {
+      document.documentElement.style.setProperty('--sidebar-w', pendingWidth + 'px');
+      try { map.resize(); } catch (_) {}
+    }
+  }
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (STATE.sidebarCollapsed) return;
+    dragging = true;
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add('sidebar-resizing');
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    // Sidebar lives flush against the left edge, so its width is just the
+    // pointer's x-coord clamped to [min, max].
+    const w = Math.max(280, Math.min(600, Math.round(e.clientX)));
+    pendingWidth = w;
+    if (!rafQueued) {
+      rafQueued = true;
+      requestAnimationFrame(applyPending);
+    }
+    e.preventDefault();
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    document.body.classList.remove('sidebar-resizing');
+    if (pendingWidth !== null) savePref('sidebarWidth', pendingWidth);
+    pendingWidth = null;
+  }
+  handle.addEventListener('pointerup',     endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+}
+
+// --- Address search ---------------------------------------------------------
+
+// Normalize an address for substring matching. Lowercase, strip punctuation
+// other than spaces and digits, collapse whitespace.
+function normalizeAddress(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildAddressIndex() {
+  const index = new Map();  // normalizedAddress -> Feature[]
+  for (const f of STATE.parcels?.features || []) {
+    const addr = f.properties?.address;
+    if (!addr || addr === 'null') continue;
+    const key = normalizeAddress(addr);
+    if (!key) continue;
+    const list = index.get(key);
+    if (list) list.push(f);
+    else index.set(key, [f]);
+  }
+  STATE.addressIndex = index;
+}
+
+// Compute a centroid for any GeoJSON Polygon or MultiPolygon. Simple average
+// of vertex coordinates — not turf-grade (won't match centroid-of-area for
+// concave shapes), but sufficient for camera-focus on small parcels.
+function centroidOfFeature(feature) {
+  let sx = 0, sy = 0, n = 0;
+  const visit = (coords) => {
+    if (typeof coords[0] === 'number') {
+      sx += coords[0]; sy += coords[1]; n += 1;
+      return;
+    }
+    for (const c of coords) visit(c);
+  };
+  if (feature?.geometry?.coordinates) visit(feature.geometry.coordinates);
+  if (!n) return null;
+  return [sx / n, sy / n];
+}
+
+let searchActiveIndex = -1;
+let searchRows = [];  // [{ feature?, features?, kind: 'addr'|'sub'|'tmk' }]
+
+function isTmkLike(q) {
+  return /^\d{6,9}$/.test(q.replace(/\s+/g, ''));
+}
+
+function runSearch(rawQuery) {
+  const q = (rawQuery || '').trim();
+  const out = document.getElementById('search-results');
+  if (q.length < 2) {
+    out.hidden = true;
+    out.innerHTML = '';
+    searchRows = [];
+    searchActiveIndex = -1;
+    return;
+  }
+  const rows = [];
+
+  // TMK exact-prefix match. Feature TMKs are 8-digit strings.
+  if (isTmkLike(q)) {
+    const target = q.replace(/\s+/g, '');
+    for (const f of STATE.parcels?.features || []) {
+      const tmk = String(f.properties?.tmk || '');
+      if (tmk.startsWith(target)) {
+        rows.push({ kind: 'tmk', feature: f });
+        if (rows.length >= 8) break;
+      }
+    }
+  }
+
+  // Address substring match.
+  const norm = normalizeAddress(q);
+  if (norm.length >= 3 && STATE.addressIndex) {
+    const seen = new Set();
+    for (const [key, features] of STATE.addressIndex) {
+      if (!key.includes(norm)) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ kind: 'addr', features });
+      if (rows.length >= 8) break;
+    }
+  }
+
+  searchRows = rows;
+  searchActiveIndex = rows.length ? 0 : -1;
+  renderSearchResults();
+  out.hidden = false;
+}
+
+function renderSearchResults() {
+  const out = document.getElementById('search-results');
+  if (!searchRows.length) {
+    out.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
+  }
+  const html = searchRows.map((row, i) => {
+    const active = i === searchActiveIndex ? ' is-active' : '';
+    if (row.kind === 'tmk') {
+      const p = row.feature.properties;
+      const addr = p.address && p.address !== 'null' ? p.address : '(no address)';
+      return `<div class="search-result${active}" data-index="${i}">
+        <div class="search-result__main">
+          <div class="search-result__addr">TMK ${escapeHTML(String(p.tmk))}</div>
+          <div class="search-result__meta">${escapeHTML(addr)}${p.land_use ? ' · ' + escapeHTML(String(p.land_use)) : ''}</div>
+        </div>
+      </div>`;
+    }
+    // Address — possibly multiple parcels (condos sharing a TMK or street).
+    const features = row.features;
+    const first = features[0].properties;
+    const stationNames = resolveStationNames(first.station_ids).join(', ');
+    const addr = first.address && first.address !== 'null' ? first.address : '(no address)';
+    const meta = [
+      stationNames ? stationNames : null,
+      `${features.length} parcel${features.length > 1 ? 's' : ''}`,
+    ].filter(Boolean).join(' · ');
+    const badge = features.length > 1
+      ? `<span class="search-result__count">× ${features.length}</span>`
+      : '';
+    return `<div class="search-result${active}" data-index="${i}">
+      <div class="search-result__main">
+        <div class="search-result__addr">${escapeHTML(addr)}</div>
+        <div class="search-result__meta">${escapeHTML(meta)}</div>
+      </div>
+      ${badge}
+    </div>`;
+  }).join('');
+  out.innerHTML = html;
+
+  out.querySelectorAll('.search-result').forEach((el) => {
+    el.addEventListener('mouseenter', () => {
+      searchActiveIndex = +el.dataset.index;
+      renderSearchResults();
+    });
+    el.addEventListener('mousedown', (e) => {
+      // mousedown not click — click fires after blur, which would have
+      // already hidden the dropdown.
+      e.preventDefault();
+      const row = searchRows[+el.dataset.index];
+      if (row) selectSearchRow(row);
+    });
+  });
+}
+
+function selectSearchRow(row) {
+  if (row.kind === 'tmk') {
+    flyToFeature(row.feature);
+    closeSearchDropdown(true);
+    return;
+  }
+  const features = row.features;
+  if (features.length === 1) {
+    flyToFeature(features[0]);
+    closeSearchDropdown(true);
+    return;
+  }
+  // Expand inline: replace the dropdown content with one row per matching
+  // parcel so the user can disambiguate condos by TMK.
+  const out = document.getElementById('search-results');
+  out.innerHTML = features.map((f, i) => {
+    const p = f.properties;
+    const meta = [`TMK ${p.tmk}`, p.land_use, p.area_ac ? `${(+p.area_ac).toFixed(2)} ac` : null]
+      .filter(Boolean).join(' · ');
+    return `<div class="search-result is-sub" data-i="${i}">
+      <div class="search-result__main">
+        <div class="search-result__addr">${escapeHTML(String(p.address || ''))}</div>
+        <div class="search-result__meta">${escapeHTML(meta)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  out.querySelectorAll('.search-result').forEach((el) => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const f = features[+el.dataset.i];
+      if (f) {
+        flyToFeature(f);
+        closeSearchDropdown(true);
+      }
+    });
+  });
+}
+
+function flyToFeature(feature) {
+  const center = centroidOfFeature(feature);
+  if (!center) return;
+  const targetPitch = STATE.extrude ? 60 : 0;
+  map.flyTo({
+    center,
+    zoom: 17,
+    pitch: targetPitch,
+    duration: 700,
+    essential: true,
+  });
+  map.once('moveend', () => {
+    // Open the popup at the projected pixel position of the parcel center.
+    try {
+      const px = map.project(center);
+      openPopup(feature.properties, px.x, px.y);
+    } catch (_) { /* map may have unloaded */ }
+  });
+}
+
+function closeSearchDropdown(clearInput) {
+  const out = document.getElementById('search-results');
+  out.hidden = true;
+  out.innerHTML = '';
+  searchRows = [];
+  searchActiveIndex = -1;
+  if (clearInput) {
+    const inp = document.getElementById('search-input');
+    inp.value = '';
+    inp.blur();
+  }
+}
+
+function wireAddressSearch() {
+  const input = document.getElementById('search-input');
+  const out   = document.getElementById('search-results');
+  let debounceTimer = null;
+
+  input.addEventListener('input', () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => runSearch(input.value), 80);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    // Stop arrow keys / Enter / Escape from reaching the map's keyboard
+    // handler so they navigate the dropdown instead of panning the map.
+    if (['ArrowDown','ArrowUp','Enter','Escape'].includes(e.key)) {
+      e.stopPropagation();
+    }
+    if (e.key === 'ArrowDown' && searchRows.length) {
+      e.preventDefault();
+      searchActiveIndex = (searchActiveIndex + 1) % searchRows.length;
+      renderSearchResults();
+    } else if (e.key === 'ArrowUp' && searchRows.length) {
+      e.preventDefault();
+      searchActiveIndex = (searchActiveIndex - 1 + searchRows.length) % searchRows.length;
+      renderSearchResults();
+    } else if (e.key === 'Enter') {
+      const row = searchRows[searchActiveIndex];
+      if (row) {
+        e.preventDefault();
+        selectSearchRow(row);
+      }
+    } else if (e.key === 'Escape') {
+      closeSearchDropdown(true);
+    }
+  });
+
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= 2 && searchRows.length) {
+      out.hidden = false;
+    }
+  });
+
+  // Click outside closes the dropdown. Use mousedown so the dropdown's own
+  // mousedown handlers run first (they preventDefault and call select).
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('#search-box')) closeSearchDropdown(false);
   });
 }
 
@@ -687,26 +1120,45 @@ function updateSegCaption() {
   if (el) el.innerHTML = SEG_CAPTIONS[STATE.mode] || 'all values per acre';
 }
 
+function rangeLabel(range, max) {
+  const [lo, hi] = range;
+  if (lo === 0 && hi >= 100) return 'All';
+  const [loD, hiD] = thresholdRange(range, max);
+  if (lo === 0)        return '≤ ' + fmtUSDk(hiD);
+  if (hi >= 100)       return '≥ ' + fmtUSDk(loD);
+  return fmtUSDk(loD) + '–' + fmtUSDk(hiD);
+}
+
+function updateRangeFill(prefix, range) {
+  const fill = document.getElementById(`${prefix}-fill`);
+  if (!fill) return;
+  const [lo, hi] = range;
+  fill.style.left  = `${lo}%`;
+  fill.style.width = `${Math.max(0, hi - lo)}%`;
+}
+
 function updateFilterUI() {
-  const minAv = thresholdFor(STATE.minAssessed, STATE.assessedMax);
-  const minTx = thresholdFor(STATE.minTax,      STATE.taxMax);
-  const avEl = document.getElementById('min-assessed-val');
-  const txEl = document.getElementById('min-tax-val');
-  if (STATE.minAssessed === 0) {
-    avEl.textContent = 'Off';
-    avEl.classList.add('off');
-  } else {
-    avEl.textContent = '≥ ' + fmtUSDk(minAv);
-    avEl.classList.remove('off');
-  }
-  if (STATE.minTax === 0) {
-    txEl.textContent = 'Off';
-    txEl.classList.add('off');
-  } else {
-    txEl.textContent = '≥ ' + fmtUSDk(minTx);
-    txEl.classList.remove('off');
-  }
-  const active = STATE.minAssessed > 0 || STATE.minTax > 0;
+  const avEl = document.getElementById('assessed-val');
+  const txEl = document.getElementById('tax-val');
+  const avLabel = rangeLabel(STATE.assessedRange, STATE.assessedMax);
+  const txLabel = rangeLabel(STATE.taxRange,      STATE.taxMax);
+  avEl.textContent = avLabel;
+  avEl.classList.toggle('off', avLabel === 'All');
+  txEl.textContent = txLabel;
+  txEl.classList.toggle('off', txLabel === 'All');
+  updateRangeFill('assessed', STATE.assessedRange);
+  updateRangeFill('tax',      STATE.taxRange);
+
+  const allBuckets = Object.keys(LAND_USE_BUCKETS).length;
+  const defaultTypes = DEFAULT_TYPE_SELECTIONS.length;
+  const typesAreDefault =
+    STATE.typeSelections.size === defaultTypes &&
+    DEFAULT_TYPE_SELECTIONS.every((b) => STATE.typeSelections.has(b));
+  const rangesActive =
+    STATE.assessedRange[0] !== 0 || STATE.assessedRange[1] !== 100 ||
+    STATE.taxRange[0]      !== 0 || STATE.taxRange[1]      !== 100;
+  const active = rangesActive || !typesAreDefault;
+
   document.getElementById('filter-reset').hidden = !active;
   document.getElementById('filter-count').textContent = active
     ? `${fmtInt.format(STATE.filtered.length)} parcels`
@@ -742,17 +1194,29 @@ function fitToStation() {
 function refresh() {
   const colorKey = METRIC_KEYS[STATE.mode];
   const filterSid = STATE.stationId ? +STATE.stationId : null;
-  const minAv = thresholdFor(STATE.minAssessed, STATE.assessedMax);
-  const minTx = thresholdFor(STATE.minTax,      STATE.taxMax);
+  const [avLo, avHi] = thresholdRange(STATE.assessedRange, STATE.assessedMax);
+  const [txLo, txHi] = thresholdRange(STATE.taxRange,      STATE.taxMax);
+  const types = STATE.typeSelections;
+  const allTypesSelected = types.size === Object.keys(LAND_USE_BUCKETS).length;
 
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
     const p = f.properties;
     if (filterSid !== null && !(p?.station_ids || []).includes(filterSid)) return false;
     if (!Number.isFinite(+p?.[colorKey])) return false;
-    if (minAv > 0 && !(+p?.assessed_value >= minAv)) return false;
-    if (minTx > 0) {
+    const av = +p?.assessed_value;
+    if (avLo > 0 && !(av >= avLo)) return false;
+    if (avHi !== Infinity && !(av <= avHi)) return false;
+    if (txLo > 0 || txHi !== Infinity) {
       const tax = (+p?.rev_per_ac) * (+p?.area_ac);
-      if (!(tax >= minTx)) return false;
+      if (txLo > 0 && !(tax >= txLo)) return false;
+      if (txHi !== Infinity && !(tax <= txHi)) return false;
+    }
+    if (!allTypesSelected) {
+      const bucket = LAND_USE_TO_BUCKET[p?.land_use];
+      // Parcels with unknown / empty land_use are kept unless ALL buckets are
+      // unchecked — otherwise unrecognised classes would silently disappear
+      // from the filter UX.
+      if (bucket && !types.has(bucket)) return false;
     }
     return true;
   });
@@ -816,19 +1280,64 @@ function renderSummary() {
     return;
   }
 
-  let totalRev = 0, totalCost = 0, totalAcres = 0;
+  let totalRev = 0, totalCost = 0, totalCostOM = 0, totalCIP = 0, totalAcres = 0;
   let hasAcres = false;
+  // Revenue breakdown by property-type bucket (matches the new filter UX
+  // so users see the same vocabulary in both places).
+  const revByBucket = {};
+  for (const b of Object.keys(LAND_USE_BUCKETS)) revByBucket[b] = 0;
+  let revOther = 0;
   for (const f of features) {
     const p = f.properties;
     const acres = +p.area_ac;
-    if (Number.isFinite(acres)) {
-      hasAcres = true;
-      totalAcres += acres;
-      if (Number.isFinite(+p.rev_per_ac)) totalRev += +p.rev_per_ac * acres;
-      if (Number.isFinite(+p.cost_per_ac)) totalCost += +p.cost_per_ac * acres;
-    }
+    if (!Number.isFinite(acres)) continue;
+    hasAcres = true;
+    totalAcres += acres;
+    const rev    = Number.isFinite(+p.rev_per_ac)     ? +p.rev_per_ac     * acres : 0;
+    const costOM = Number.isFinite(+p.cost_om_per_ac) ? +p.cost_om_per_ac * acres : 0;
+    const cip    = Number.isFinite(+p.cip_per_ac)     ? +p.cip_per_ac     * acres : 0;
+    const cost   = Number.isFinite(+p.cost_per_ac)    ? +p.cost_per_ac    * acres : 0;
+    totalRev    += rev;
+    totalCostOM += costOM;
+    totalCIP    += cip;
+    totalCost   += cost;
+    const bucket = LAND_USE_TO_BUCKET[p.land_use];
+    if (bucket) revByBucket[bucket] += rev;
+    else        revOther += rev;
   }
   const totalNet = totalRev - totalCost;
+
+  // Build the multi-line tooltip strings. Newlines render via CSS
+  // white-space: pre-line. Buckets with $0 are omitted to keep the
+  // tooltip short when filters narrow the visible set.
+  const revTooltipLines = [];
+  for (const [bucket, classes] of Object.entries(LAND_USE_BUCKETS)) {
+    const v = revByBucket[bucket] || 0;
+    if (v <= 0) continue;
+    const pct = totalRev > 0 ? Math.round((v / totalRev) * 100) : 0;
+    const label = bucket === 'PublicService' ? 'Public Service' : bucket;
+    revTooltipLines.push(`${label}: ${fmtUSDk(v)} (${pct}%)`);
+  }
+  if (revOther > 0) {
+    const pct = totalRev > 0 ? Math.round((revOther / totalRev) * 100) : 0;
+    revTooltipLines.push(`Unclassified: ${fmtUSDk(revOther)} (${pct}%)`);
+  }
+  const revTooltip = revTooltipLines.length
+    ? 'Annual property tax by type (visible parcels)\n' + revTooltipLines.join('\n')
+    : 'Annual property tax across visible parcels';
+
+  const costTooltipLines = [];
+  if (totalCostOM > 0) {
+    const pct = totalCost > 0 ? Math.round((totalCostOM / totalCost) * 100) : 0;
+    costTooltipLines.push(`Operating (O&M): ${fmtUSDk(totalCostOM)} (${pct}%)`);
+  }
+  if (totalCIP > 0) {
+    const pct = totalCost > 0 ? Math.round((totalCIP / totalCost) * 100) : 0;
+    costTooltipLines.push(`Capital (CIP, 6yr-avg): ${fmtUSDk(totalCIP)} (${pct}%)`);
+  }
+  const costTooltip = costTooltipLines.length
+    ? 'Annual infrastructure cost (visible parcels)\n' + costTooltipLines.join('\n')
+    : 'Annual cost across visible parcels';
 
   const top = [...features]
     .filter((f) => Number.isFinite(+f.properties?.net_per_ac))
@@ -837,8 +1346,8 @@ function renderSummary() {
 
   const totalsHTML = hasAcres ? `
     <div class="row"><span class="k">Acres</span><span class="v">${fmtInt.format(Math.round(totalAcres))}</span></div>
-    <div class="row"><span class="k">Total revenue</span><span class="v">${fmtUSDk(totalRev)}</span></div>
-    <div class="row"><span class="k">Total cost</span><span class="v">${fmtUSDk(totalCost)}</span></div>
+    <div class="row" data-tooltip="${escapeAttr(revTooltip)}"><span class="k">Total revenue</span><span class="v">${fmtUSDk(totalRev)}</span></div>
+    <div class="row" data-tooltip="${escapeAttr(costTooltip)}"><span class="k">Total cost</span><span class="v">${fmtUSDk(totalCost)}</span></div>
     <div class="row"><span class="k">Net</span><span class="v ${totalNet >= 0 ? 'net-pos' : 'net-neg'}">${fmtUSDk(totalNet)}</span></div>
   ` : `<p class="muted" style="margin:0;font-size:11px;">Add an <code>acres</code> property to parcels for absolute totals.</p>`;
 
@@ -856,6 +1365,54 @@ function renderSummary() {
       </ol>
     </div>
   `;
+}
+
+// HTML attribute encoder — keeps newlines (\n) intact since the tooltip
+// renders with CSS white-space: pre-line.
+function escapeAttr(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+// Body-level tooltip for the summary's "Total revenue" / "Total cost" rows.
+// Pure-CSS pseudo-element approach was clipped by #sidebar's auto overflow
+// (overflow-y:auto coerces overflow-x to auto per spec). The single fixed
+// element lives outside the sidebar's stacking context so it escapes the
+// clip. wireSummaryTooltips delegates one mouseover/mouseout pair to the
+// summary container and reads data-tooltip on hover.
+const summaryTooltipEl = document.getElementById('summary-tooltip');
+let summaryTooltipsWired = false;
+function wireSummaryTooltips() {
+  if (summaryTooltipsWired) return;
+  summaryTooltipsWired = true;
+  const summary = document.getElementById('summary');
+  summary.addEventListener('mouseover', (e) => {
+    const row = e.target.closest('.row[data-tooltip]');
+    if (!row || !summaryTooltipEl) return;
+    summaryTooltipEl.textContent = row.dataset.tooltip || '';
+    // Position to the right of the row, vertically centered, clamped to
+    // viewport so the tooltip never falls off-screen.
+    const r = row.getBoundingClientRect();
+    summaryTooltipEl.classList.add('is-visible');
+    // First make visible so we can measure; then position.
+    const tipH = summaryTooltipEl.offsetHeight || 80;
+    const tipW = summaryTooltipEl.offsetWidth  || 240;
+    let x = r.right + 14;
+    if (x + tipW > window.innerWidth - 8) x = Math.max(8, r.left - tipW - 14);
+    let y = r.top + r.height / 2 - tipH / 2;
+    y = Math.max(8, Math.min(y, window.innerHeight - tipH - 8));
+    summaryTooltipEl.style.left = x + 'px';
+    summaryTooltipEl.style.top  = y + 'px';
+  });
+  summary.addEventListener('mouseout', (e) => {
+    const row = e.target.closest('.row[data-tooltip]');
+    if (!row) return;
+    // mouseout fires when entering child elements too; only hide when the
+    // pointer truly left the row.
+    if (e.relatedTarget && row.contains(e.relatedTarget)) return;
+    if (summaryTooltipEl) summaryTooltipEl.classList.remove('is-visible');
+  });
 }
 
 function bboxOf(features) {

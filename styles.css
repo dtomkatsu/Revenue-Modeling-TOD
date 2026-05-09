@@ -6,7 +6,10 @@
    #2F3E46  charcoal blue    — primary surface (sidebar, popups)
    #FFFFFF  white            — emphasized text, key numbers                  */
 :root {
-  --sidebar-w: 320px;
+  --sidebar-w: 360px;
+  --sidebar-w-min: 280px;
+  --sidebar-w-max: 600px;
+  --sidebar-w-collapsed: 36px;
 
   --c-charcoal:  #2F3E46;
   --c-slate:     #354F52;
@@ -60,6 +63,78 @@ body {
   /* Subtle inner-left accent line in muted teal — gives the panel an
      identity edge without an opaque colored bar across the whole top. */
   box-shadow: inset 3px 0 0 var(--c-teal);
+  position: relative;
+}
+
+/* Collapsed-sidebar mode: shrinks to a thin rail showing only the toggle
+   button. Map fills the freed space via flexbox. */
+body.sidebar-collapsed #sidebar {
+  flex: 0 0 var(--sidebar-w-collapsed);
+  width: var(--sidebar-w-collapsed);
+  padding: 12px 4px;
+  overflow: hidden;
+}
+body.sidebar-collapsed #sidebar > :not(#sidebar-toggle):not(#sidebar-resize) {
+  display: none;
+}
+
+/* Drag handle on the right edge — 6px wide invisible hit target. Hover
+   shows a teal vertical line; cursor flips to col-resize. */
+.sidebar-resize {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 4;
+  user-select: none;
+  touch-action: none;
+}
+.sidebar-resize::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  right: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.sidebar-resize:hover::after,
+body.sidebar-resizing .sidebar-resize::after {
+  background: var(--c-teal);
+}
+body.sidebar-resizing,
+body.sidebar-resizing * { cursor: col-resize !important; user-select: none; }
+body.sidebar-collapsed .sidebar-resize { display: none; }
+
+/* Collapse / expand chevron pinned to the sidebar's top-right inside the
+   panel. Rotates 180° via .sidebar-collapsed on body so the same glyph
+   reads as both "collapse" and "expand". */
+.sidebar-toggle {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 22px; height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(107, 158, 120, 0.10);
+  color: var(--c-teal);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 5;
+  transition: background 0.15s, transform 0.18s, border-color 0.15s;
+}
+.sidebar-toggle:hover {
+  background: rgba(107, 158, 120, 0.22);
+  border-color: var(--c-teal);
+}
+body.sidebar-collapsed .sidebar-toggle {
+  position: static;
+  margin: 0 auto;
+  transform: rotate(180deg);
 }
 
 #sidebar header {
@@ -371,6 +446,107 @@ select, button, input {
   box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+/* Dual-thumb range. Two range inputs are stacked over a shared track. The
+   trick: pointer-events:none on the inputs (so both don't block each
+   other), pointer-events:auto on the thumbs only. JS positions
+   .range-fill between the two thumbs as a teal segment. */
+.range-dual {
+  position: relative;
+  height: 22px;
+  margin: 0;
+}
+.range-track {
+  position: absolute;
+  left: 0; right: 0; top: 9px;
+  height: 4px;
+  background: rgba(202, 210, 197, 0.14);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.range-fill {
+  position: absolute;
+  top: 9px;
+  height: 4px;
+  background: var(--c-teal);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.range-dual input[type=range] {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.range-dual input[type=range]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.range-dual input[type=range]::-moz-range-track {
+  height: 4px;
+  background: transparent;
+  border: none;
+}
+.range-dual input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: var(--c-teal);
+  border: 2px solid var(--c-slate);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  margin-top: -6px;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.range-dual input[type=range]::-moz-range-thumb {
+  pointer-events: auto;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: var(--c-teal);
+  border: 2px solid var(--c-slate);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+.range-dual input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; }
+.range-dual input[type=range]:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.20), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.range-dual input[type=range]:focus { outline: none; }
+.range-dual input[type=range]:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Property-type filter — checkbox grid. Mirrors .check styling but uses
+   tighter row spacing since there are 6 buckets. */
+.type-filter {
+  margin-top: 4px;
+}
+.type-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 3px 0;
+}
+.type-check input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--c-teal);
+}
+
 .filter-meta {
   display: flex;
   justify-content: space-between;
@@ -558,6 +734,154 @@ select, button, input {
   background: rgba(107, 158, 120, 0.10);
   border: 1px solid rgba(107, 158, 120, 0.22);
   font-variant-numeric: tabular-nums;
+}
+
+/* Summary card tooltips for "Total revenue" / "Total cost". A pseudo-
+   element won't work here because #sidebar's overflow-y:auto coerces
+   overflow-x to auto per spec, clipping anything positioned outside.
+   Instead we render a single body-level #summary-tooltip element and
+   position it with JS on mouseenter (see script.js wireSummaryTooltips).
+   Multi-line content via white-space: pre-line. */
+.summary .row[data-tooltip] {
+  cursor: help;
+}
+#summary-tooltip {
+  position: fixed;
+  white-space: pre-line;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--c-charcoal);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  z-index: 25;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+}
+#summary-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Address search bar — anchored top-center over the map area, NOT inside
+   the sidebar (so it survives sidebar collapse). Avoids collision with
+   MapLibre's NavigationControl at top-right. */
+.search-box {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(420px, 50vw);
+  min-width: 240px;
+}
+.search-box input {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(28, 38, 43, 0.92);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  color: var(--c-white);
+  font-size: 13px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search-box input::placeholder {
+  color: var(--muted);
+}
+.search-box input:focus {
+  outline: none;
+  border-color: var(--c-teal);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 3px rgba(107, 158, 120, 0.20),
+    0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.search-results {
+  margin-top: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: rgba(28, 38, 43, 0.94);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+}
+.search-results[hidden] { display: none; }
+
+.search-result {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-soft);
+  border: 1px solid transparent;
+}
+.search-result:hover,
+.search-result.is-active {
+  background: rgba(107, 158, 120, 0.14);
+  border-color: rgba(107, 158, 120, 0.30);
+  color: var(--c-white);
+}
+.search-result__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.search-result__addr {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-white);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-result__meta {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.search-result__count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-teal);
+  background: rgba(107, 158, 120, 0.14);
+  border: 1px solid rgba(107, 158, 120, 0.32);
+  padding: 2px 7px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.search-result.is-sub {
+  margin-left: 18px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.search-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .muted {
