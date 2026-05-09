@@ -41,6 +41,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -134,6 +135,71 @@ def _coerce_number(s: pd.Series) -> pd.Series:
         return s.astype(float)
     cleaned = s.astype(str).str.replace(r"[\$,\s]", "", regex=True)
     return pd.to_numeric(cleaned, errors="coerce")
+
+
+def _round_coords(obj, decimals: int):
+    """Recursively round float coordinates in a parsed GeoJSON object so tiny
+    cross-machine float drift (different geos/proj versions) doesn't churn
+    the committed artifact. ~7 decimals = 1 cm at Honolulu's latitude."""
+    if isinstance(obj, list):
+        if obj and all(isinstance(c, (int, float)) for c in obj):
+            return [round(c, decimals) if isinstance(c, float) else c for c in obj]
+        return [_round_coords(x, decimals) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _round_coords(v, decimals) for k, v in obj.items()}
+    return obj
+
+
+def _serialize_fc(obj) -> str:
+    """Serialize a FeatureCollection with each top-level field on its own line
+    and each feature on its own line. Compact within features (no whitespace)
+    so file size stays small while git diffs remain feature-scoped."""
+    if obj.get("type") != "FeatureCollection":
+        return json.dumps(obj, separators=(",", ":")) + "\n"
+    parts = ['{']
+    for k, v in obj.items():
+        if k == "features":
+            continue
+        parts.append(f'"{k}":{json.dumps(v, separators=(",", ":"))},')
+    parts.append('"features":[')
+    feats = obj.get("features", [])
+    for i, f in enumerate(feats):
+        sep = "," if i < len(feats) - 1 else ""
+        parts.append(json.dumps(f, separators=(",", ":")) + sep)
+    parts.append(']}')
+    return "\n".join(parts) + "\n"
+
+
+def _emit_geojson_idempotent(
+    gdf: gpd.GeoDataFrame, output_path: Path, *, decimals: int | None = None
+) -> bool:
+    """Write *gdf* as GeoJSON to *output_path*, but skip the rewrite if the
+    resulting (optionally coord-rounded) content is byte-identical to the
+    existing file. Returns True if the file was rewritten, False if skipped.
+
+    Companion to a stable manifest: the caller should also gate the
+    write_manifest call on the return value, so unchanged content keeps
+    its original ``fetched_at``.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output_path.with_suffix(output_path.suffix + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    gdf.to_file(tmp, driver="GeoJSON")
+    obj = json.loads(tmp.read_text())
+    tmp.unlink()
+    # fiona derives the FeatureCollection ``name`` from the path it wrote to,
+    # so the temp file leaves it as ``<stem>.geojson``. Pin it to the final
+    # output's stem to match the prior on-disk convention.
+    if isinstance(obj, dict) and "name" in obj:
+        obj["name"] = output_path.stem
+    if decimals is not None:
+        obj = _round_coords(obj, decimals)
+    new_text = _serialize_fc(obj)
+    if output_path.exists() and output_path.read_text() == new_text:
+        return False
+    output_path.write_text(new_text)
+    return True
 
 
 def emit_frontend(*, force: bool) -> int:
@@ -266,27 +332,27 @@ def emit_frontend(*, force: bool) -> int:
     keep = parcel_props + ["station_ids", "geometry"]
     out_parcels = deduped[keep].copy()
 
-    OUTPUT_PARCELS.parent.mkdir(parents=True, exist_ok=True)
-    if OUTPUT_PARCELS.exists():
-        OUTPUT_PARCELS.unlink()
-    out_parcels.to_file(OUTPUT_PARCELS, driver="GeoJSON")
+    changed = _emit_geojson_idempotent(out_parcels, OUTPUT_PARCELS)
     all_stations = sorted({sid for ids in out_parcels["station_ids"] for sid in ids})
-    write_manifest(
-        OUTPUT_PARCELS,
-        source_url=f"file://{REVENUE_PATH} + file://{COSTS_PATH}",
-        row_count=len(out_parcels),
-        script=SCRIPT_NAME,
-        extras={
-            "value_field":          value_field,
-            "class_field":          class_field,
-            "rows_unmatched_cost":  n_unmatched,
-            "crs":                  f"EPSG:{WGS84}",
-            "stations_represented": all_stations,
-            "deduped_by_tmk":       True,
-            "rows_collapsed":       n_before - len(deduped),
-        },
-    )
-    print(f"[done] {OUTPUT_PARCELS.relative_to(_ROOT)} ({len(out_parcels)} rows)")
+    if changed:
+        write_manifest(
+            OUTPUT_PARCELS,
+            source_url=f"{REVENUE_PATH.relative_to(_ROOT).as_posix()} + "
+                       f"{COSTS_PATH.relative_to(_ROOT).as_posix()}",
+            row_count=len(out_parcels),
+            script=SCRIPT_NAME,
+            extras={
+                "value_field":          value_field,
+                "class_field":          class_field,
+                "rows_unmatched_cost":  n_unmatched,
+                "crs":                  f"EPSG:{WGS84}",
+                "stations_represented": all_stations,
+                "deduped_by_tmk":       True,
+                "rows_collapsed":       n_before - len(deduped),
+            },
+        )
+    suffix = "" if changed else " (unchanged, skipped)"
+    print(f"[done] {OUTPUT_PARCELS.relative_to(_ROOT)} ({len(out_parcels)} rows){suffix}")
 
     # ---- Stations -------------------------------------------------------
     print(f"[read] {STATIONS_PATH.relative_to(_ROOT)}")
@@ -304,21 +370,21 @@ def emit_frontend(*, force: bool) -> int:
     operating = operating[["id", "name", "geometry"]]
     operating["id"] = operating["id"].astype(int)
 
-    if OUTPUT_STATIONS.exists():
-        OUTPUT_STATIONS.unlink()
-    operating.to_file(OUTPUT_STATIONS, driver="GeoJSON")
-    write_manifest(
-        OUTPUT_STATIONS,
-        source_url=f"file://{STATIONS_PATH}",
-        row_count=len(operating),
-        script=SCRIPT_NAME,
-        extras={
-            "operating_only": True,
-            "station_ids":    sorted(operating["id"].tolist()),
-            "crs":            f"EPSG:{WGS84}",
-        },
-    )
-    print(f"[done] {OUTPUT_STATIONS.relative_to(_ROOT)} ({len(operating)} stations)")
+    changed = _emit_geojson_idempotent(operating, OUTPUT_STATIONS, decimals=7)
+    if changed:
+        write_manifest(
+            OUTPUT_STATIONS,
+            source_url=STATIONS_PATH.relative_to(_ROOT).as_posix(),
+            row_count=len(operating),
+            script=SCRIPT_NAME,
+            extras={
+                "operating_only": True,
+                "station_ids":    sorted(operating["id"].tolist()),
+                "crs":            f"EPSG:{WGS84}",
+            },
+        )
+    suffix = "" if changed else " (unchanged, skipped)"
+    print(f"[done] {OUTPUT_STATIONS.relative_to(_ROOT)} ({len(operating)} stations){suffix}")
 
     # ---- Rail line ribbon ----------------------------------------------
     # Buffer the operating Skyline guideway centerlines into a thin polygon
@@ -356,24 +422,24 @@ def emit_frontend(*, force: bool) -> int:
             crs=f"EPSG:{WGS84}",
         )
 
-        if OUTPUT_RAIL.exists():
-            OUTPUT_RAIL.unlink()
-        rail_out.to_file(OUTPUT_RAIL, driver="GeoJSON")
-        write_manifest(
-            OUTPUT_RAIL,
-            source_url=f"file://{GUIDEWAY_PATH}",
-            row_count=len(rail_out),
-            script=SCRIPT_NAME,
-            extras={
-                "halfwidth_ft":   RAIL_HALFWIDTH_FT,
-                "buffer_crs":     f"EPSG:{HI_FEET}",
-                "operating_only": True,
-                "sections":       list(OPERATING_RAIL_SECTIONS),
-                "crs":            f"EPSG:{WGS84}",
-            },
-        )
+        changed = _emit_geojson_idempotent(rail_out, OUTPUT_RAIL, decimals=7)
+        if changed:
+            write_manifest(
+                OUTPUT_RAIL,
+                source_url=GUIDEWAY_PATH.relative_to(_ROOT).as_posix(),
+                row_count=len(rail_out),
+                script=SCRIPT_NAME,
+                extras={
+                    "halfwidth_ft":   RAIL_HALFWIDTH_FT,
+                    "buffer_crs":     f"EPSG:{HI_FEET}",
+                    "operating_only": True,
+                    "sections":       list(OPERATING_RAIL_SECTIONS),
+                    "crs":            f"EPSG:{WGS84}",
+                },
+            )
+        suffix = "" if changed else " (unchanged, skipped)"
         print(f"[done] {OUTPUT_RAIL.relative_to(_ROOT)} "
-              f"({len(center)} centerlines → 1 dissolved ribbon)")
+              f"({len(center)} centerlines → 1 dissolved ribbon){suffix}")
 
     return 0
 

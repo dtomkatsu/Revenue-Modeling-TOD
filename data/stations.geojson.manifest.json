@@ -1,9 +1,9 @@
 {
   "output": "stations.geojson",
-  "source_url": "file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/raw/rail_transit_station_points.geojson",
+  "source_url": "data/raw/rail_transit_station_points.geojson",
   "row_count": 13,
   "script": "etl/08_emit_frontend_data.py",
-  "fetched_at": "2026-05-08T05:21:49+00:00",
+  "fetched_at": "2026-05-09T04:21:37+00:00",
   "operating_only": true,
   "station_ids": [
     1,
