@@ -3,7 +3,7 @@
   "source_url": "file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_revenue.geojson + file:///Users/devinthomas/repos/Revenue-Modeling-TOD/data/processed/parcels_costs.geojson",
   "row_count": 19872,
   "script": "etl/08_emit_frontend_data.py",
-  "fetched_at": "2026-05-08T23:42:41+00:00",
+  "fetched_at": "2026-05-09T03:57:16+00:00",
   "value_field": "assessed_value",
   "class_field": "land_use",
   "rows_unmatched_cost": 0,

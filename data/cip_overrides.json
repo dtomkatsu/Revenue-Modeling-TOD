@@ -1,9 +1,9 @@
 {
-  "_notes": "Manual overrides for CIP totals (etl/03b_extract_cip_totals.py). Any non-null value here wins over the value extracted from the City CIP budget PDF. The Board of Water Supply is semi-autonomous — its FY26 capital total is not in the City Capital Budget PDF; pull it from the BWS Six-Year CIP and drop the integer (USD/year, annualized) into water_cip_total_usd below.",
+  "_notes": "Manual overrides for CIP totals (etl/03b_extract_cip_totals.py). Any non-null value here wins over the value extracted from the City CIP budget PDF. The Board of Water Supply is semi-autonomous — its FY26 capital total is not in the City Capital Budget PDF and is loaded here from the BWS Six-Year CIP FY21-26 (annualized 6-year average to match road/sewer methodology) and the FY26 Combined Op+CIP budget (single-year, post-Amendment #4). water_cip_total_usd = $1,142,186,000 (FY21-26 6yr total) / 6 = $190,364,333/yr. water_cip_fy26_usd = $283,327,500 (FY26 all-funds: Operating Fund $79.1M + SRF $67.9M + Special Expendable $10.9M + Improvement $43.4M + Extramural $19M + WIFIA $63M, per Amendment #4 dated 2026-01-14). Sources: https://www.boardofwatersupply.com/media/r0xc0cpd/bws-six-year-cip-fy-2021-2026.pdf and https://www.boardofwatersupply.com/media/w3jle0xy/2026-01-14-fy-2026-budget-amendment-no-4.pdf. Retrieved 2026-05-08.",
   "road_cip_total_usd": null,
   "sewer_cip_total_usd": null,
-  "water_cip_total_usd": null,
+  "water_cip_total_usd": 190364333,
   "road_cip_fy26_usd": null,
   "sewer_cip_fy26_usd": null,
-  "water_cip_fy26_usd": null
+  "water_cip_fy26_usd": 283327500
 }
