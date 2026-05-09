@@ -23,7 +23,7 @@
   </section>
 
   <section class="control">
-    <label>Metric <span class="year-badge year-badge--label">FY2026</span></label>
+    <label>Metric</label>
     <div class="seg" id="mode-toggle" role="radiogroup">
       <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true"
         data-tooltip="The property tax this parcel pays the city each year, divided by its size in acres. Higher = more tax revenue per acre of land. (FY2026)">Revenue</button>
@@ -73,13 +73,18 @@
       </div>
     </div>
     <div class="filter type-filter">
-      <div class="filter-head"><span class="filter-name">Property type</span></div>
+      <button class="type-filter-toggle" aria-expanded="false" aria-controls="type-filter-more">
+        <span class="filter-name">Property type</span>
+        <span class="type-filter-toggle__caret" aria-hidden="true">▾</span>
+      </button>
       <label class="type-check"><input type="checkbox" data-bucket="Residential" checked><span>Residential</span></label>
-      <label class="type-check"><input type="checkbox" data-bucket="Multi-family" checked><span>Multi-family (apartments)</span></label>
-      <label class="type-check"><input type="checkbox" data-bucket="Commercial" checked><span>Commercial &amp; hotel</span></label>
-      <label class="type-check"><input type="checkbox" data-bucket="Industrial" checked><span>Industrial</span></label>
-      <label class="type-check"><input type="checkbox" data-bucket="Other" checked><span>Other (Ag, preservation)</span></label>
-      <label class="type-check"><input type="checkbox" data-bucket="PublicService"><span>Public Service (gov, utility)</span></label>
+      <div id="type-filter-more" class="type-filter-more" hidden>
+        <label class="type-check"><input type="checkbox" data-bucket="Multi-family" checked><span>Multi-family (apartments)</span></label>
+        <label class="type-check"><input type="checkbox" data-bucket="Commercial" checked><span>Commercial &amp; hotel</span></label>
+        <label class="type-check"><input type="checkbox" data-bucket="Industrial" checked><span>Industrial</span></label>
+        <label class="type-check"><input type="checkbox" data-bucket="Other" checked><span>Other (Ag, preservation)</span></label>
+        <label class="type-check"><input type="checkbox" data-bucket="PublicService"><span>Public Service (gov, utility)</span></label>
+      </div>
     </div>
     <div class="filter-meta">
       <span id="filter-count" class="filter-count"></span>
@@ -115,6 +120,7 @@
 <div id="parcel-tooltip" class="parcel-tooltip" hidden></div>
 <div id="parcel-popup" class="parcel-popup" hidden></div>
 <div id="summary-tooltip" aria-hidden="true"></div>
+<div id="seg-tooltip" aria-hidden="true"></div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"

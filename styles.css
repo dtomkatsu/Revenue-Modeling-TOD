@@ -44,6 +44,10 @@ html, body {
 
 body {
   display: flex;
+  /* Prevent the document itself from scrolling — the sidebar handles its
+     own overflow internally. Without this, macOS "Show scrollbars: Always"
+     renders a duplicate window-level scrollbar next to the sidebar's. */
+  overflow: hidden;
 }
 
 #sidebar {
@@ -175,7 +179,7 @@ body.sidebar-collapsed .sidebar-toggle {
 
 .control > label,
 .control > h2 {
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -226,7 +230,7 @@ select, button, input {
   border: none;
   border-right: 1px solid var(--border-soft);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-soft);
   opacity: 0.7;
   transition: background 0.12s, color 0.12s, opacity 0.12s;
@@ -245,37 +249,9 @@ select, button, input {
   opacity: 1;
 }
 
-.seg-btn[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--c-charcoal);
-  color: var(--text-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 11px;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: normal;
-  width: max-content;
-  max-width: 220px;
-  z-index: 20;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-}
-.seg-btn[data-tooltip]:hover::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--c-charcoal);
-  z-index: 21;
-  pointer-events: none;
-}
+/* Metric button tooltips are handled by a body-level #seg-tooltip element
+   (see script.js wireSegTooltip) — pseudo-elements would be clipped by
+   #sidebar's overflow-y:auto coercing overflow-x:auto per spec. */
 
 .seg-caption {
   font-size: 10.5px;
@@ -365,7 +341,7 @@ select, button, input {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 11.5px;
+  font-size: 13px;
 }
 .filter-name {
   color: var(--text-soft);
@@ -375,7 +351,7 @@ select, button, input {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--c-teal);
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 10px;
   background: rgba(107, 158, 120, 0.10);
@@ -531,11 +507,41 @@ select, button, input {
 .type-filter {
   margin-top: 4px;
 }
+
+.type-filter-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0 0 4px;
+  cursor: pointer;
+  color: inherit;
+}
+.type-filter-toggle .filter-name {
+  font-size: 13px;
+}
+.type-filter-toggle__caret {
+  font-size: 12px;
+  color: var(--muted);
+  transition: transform 0.18s ease;
+  line-height: 1;
+}
+.type-filter-toggle[aria-expanded="true"] .type-filter-toggle__caret {
+  transform: rotate(180deg);
+}
+
+.type-filter-more {
+  display: flex;
+  flex-direction: column;
+}
+.type-filter-more[hidden] { display: none; }
 .type-check {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-soft);
   cursor: pointer;
   padding: 3px 0;
@@ -594,7 +600,7 @@ select, button, input {
 .legend-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -767,6 +773,31 @@ select, button, input {
   transition: opacity 0.12s;
 }
 #summary-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Metric-button tooltip — same body-level fixed pattern as #summary-tooltip. */
+#seg-tooltip {
+  position: fixed;
+  white-space: normal;
+  min-width: 180px;
+  max-width: 260px;
+  background: var(--c-charcoal);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 11px;
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  z-index: 25;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s;
+}
+#seg-tooltip.is-visible {
   opacity: 1;
   visibility: visible;
 }
@@ -1112,7 +1143,7 @@ select, button, input {
 
 .parcel-popup__section h3 {
   margin: 0 0 8px;
-  font-size: 9.5px;
+  font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   /* Brighter sea-foam — full saturation, full alpha, with a subtle dark
@@ -1132,7 +1163,7 @@ select, button, input {
 }
 .parcel-popup__row .k {
   color: rgba(202, 210, 197, 0.82);
-  font-size: 11px;
+  font-size: 12.5px;
   letter-spacing: 0.01em;
   font-weight: 500;
 }
@@ -1144,7 +1175,7 @@ select, button, input {
   padding: 2px 10px;
   border-radius: 10px;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--c-white);
   background: rgba(107, 158, 120, 0.16);
   border: 1px solid rgba(107, 158, 120, 0.32);
@@ -1192,8 +1223,8 @@ select, button, input {
   backdrop-filter: blur(8px) saturate(160%);
   border: 1px solid rgba(14, 165, 233, 0.45);
   border-radius: 6px;
-  padding: 4px 10px 4px 8px;
-  font-size: 12px;
+  padding: 5px 12px 5px 9px;
+  font-size: 13.5px;
   font-weight: 600;
   color: #0c4a6e;
   white-space: nowrap;

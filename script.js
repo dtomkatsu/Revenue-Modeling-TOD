@@ -162,10 +162,19 @@ map.getContainer().addEventListener('mouseleave', () => {
   tooltipEl.hidden = true;
 });
 
-// Escape closes the click popup. Click-outside (i.e. clicking empty map)
-// is already handled via deck.gl's onClick passing object:null.
+// Escape closes the click popup.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && selectedTmk !== null) closePopup();
+});
+
+// Click anywhere outside the popup closes it — sidebar, controls, search,
+// AND the map (ocean, blank space, even another parcel). When the click lands
+// on a parcel, deck.gl's onClick fires after our mousedown and reopens with
+// the new parcel; net effect is "switch parcel" with no visible flicker.
+document.addEventListener('mousedown', (e) => {
+  if (popupEl.hidden) return;
+  if (popupEl.contains(e.target)) return;
+  closePopup();
 });
 
 map.on('load', async () => {
@@ -362,8 +371,8 @@ function addLayers() {
     source: 'rail-line',
     layout: { visibility: STATE.extrude ? 'visible' : 'none' },
     paint: {
-      'fill-color': '#06b6d4',
-      'fill-opacity': 0.32,
+      'fill-color': '#00c8e8',
+      'fill-opacity': 0.62,
       'fill-antialias': false,
     },
   });
@@ -424,7 +433,7 @@ function buildHTML(p) {
   const subBits = [];
   if (p.tmk) subBits.push(`TMK ${escapeHTML(String(p.tmk))}`);
   return `
-    <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')} ${yearBadgeHTML}</div>
+    <div class="pp-title">${escapeHTML(addr ?? p.tmk ?? p.parcel_id ?? 'Parcel')}</div>
     ${subBits.length ? `<div class="pp-sub">${subBits.join(' · ')}</div>` : ''}
     <div class="${primaryClass('revenue')}"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
     <div class="${primaryClass('cost')}"><span class="k">Cost / ac</span><span class="v">${fmtUSDk(+p.cost_per_ac)}</span></div>
@@ -472,7 +481,7 @@ function buildPopupHTML(p) {
     </div>
 
     <div class="parcel-popup__section">
-      <h3>Assessment ${yearBadgeHTML}</h3>
+      <h3>Assessment</h3>
       <div class="parcel-popup__row"><span class="k">Assessed value</span><span class="v">${fmtUSDk(+p.assessed_value)}</span></div>
       <div class="parcel-popup__row"><span class="k">Property tax</span><span class="v">${fmtUSDk(annualRev)}</span></div>
       <div class="parcel-popup__row"><span class="k">Operating cost (O&amp;M)</span><span class="v">${fmtUSDk(annualCostOM)}</span></div>
@@ -482,7 +491,7 @@ function buildPopupHTML(p) {
     </div>
 
     <div class="parcel-popup__section">
-      <h3>Per acre ${yearBadgeHTML}</h3>
+      <h3>Per acre</h3>
       <div class="parcel-popup__row"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">O&amp;M / ac</span><span class="v">${fmtUSDk(+p.cost_om_per_ac)}</span></div>
       <div class="parcel-popup__row"><span class="k">CIP / ac</span><span class="v">${fmtUSDk(+p.cip_per_ac)}</span></div>
@@ -718,10 +727,21 @@ function wireUI() {
     refresh();
   });
 
+  const typeToggleBtn = document.querySelector('.type-filter-toggle');
+  const typeMore = document.getElementById('type-filter-more');
+  if (typeToggleBtn && typeMore) {
+    typeToggleBtn.addEventListener('click', () => {
+      const expanded = typeToggleBtn.getAttribute('aria-expanded') === 'true';
+      typeToggleBtn.setAttribute('aria-expanded', String(!expanded));
+      typeMore.hidden = expanded;
+    });
+  }
+
   wireSidebarToggle();
   wireSidebarResize();
   wireAddressSearch();
   wireSummaryTooltips();
+  wireSegTooltip();
 }
 
 // Dual-thumb range input wiring. The two inputs occupy the same screen space;
@@ -865,21 +885,30 @@ function buildAddressIndex() {
   STATE.addressIndex = index;
 }
 
-// Compute a centroid for any GeoJSON Polygon or MultiPolygon. Simple average
-// of vertex coordinates — not turf-grade (won't match centroid-of-area for
-// concave shapes), but sufficient for camera-focus on small parcels.
-function centroidOfFeature(feature) {
-  let sx = 0, sy = 0, n = 0;
+// Bounding box of a GeoJSON Polygon or MultiPolygon — [w, s, e, n].
+function bboxOfFeature(feature) {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
   const visit = (coords) => {
     if (typeof coords[0] === 'number') {
-      sx += coords[0]; sy += coords[1]; n += 1;
+      if (coords[0] < w) w = coords[0];
+      if (coords[0] > e) e = coords[0];
+      if (coords[1] < s) s = coords[1];
+      if (coords[1] > n) n = coords[1];
       return;
     }
     for (const c of coords) visit(c);
   };
   if (feature?.geometry?.coordinates) visit(feature.geometry.coordinates);
-  if (!n) return null;
-  return [sx / n, sy / n];
+  if (!isFinite(w)) return null;
+  return [w, s, e, n];
+}
+
+// Bbox center — guaranteed within the parcel's footprint area, unlike a
+// vertex-average centroid which can fall outside MultiPolygons.
+function centroidOfFeature(feature) {
+  const b = bboxOfFeature(feature);
+  if (!b) return null;
+  return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
 }
 
 let searchActiveIndex = -1;
@@ -932,13 +961,18 @@ function runSearch(rawQuery) {
   out.hidden = false;
 }
 
+// When a multi-feature address row is expanded inline, this holds the
+// feature list keyed by sub-row data-i.
+let searchSubFeatures = null;
+
 function renderSearchResults() {
   const out = document.getElementById('search-results');
+  searchSubFeatures = null;
   if (!searchRows.length) {
     out.innerHTML = '<div class="search-empty">No matches</div>';
     return;
   }
-  const html = searchRows.map((row, i) => {
+  out.innerHTML = searchRows.map((row, i) => {
     const active = i === searchActiveIndex ? ' is-active' : '';
     if (row.kind === 'tmk') {
       const p = row.feature.properties;
@@ -970,20 +1004,15 @@ function renderSearchResults() {
       ${badge}
     </div>`;
   }).join('');
-  out.innerHTML = html;
+}
 
-  out.querySelectorAll('.search-result').forEach((el) => {
-    el.addEventListener('mouseenter', () => {
-      searchActiveIndex = +el.dataset.index;
-      renderSearchResults();
-    });
-    el.addEventListener('mousedown', (e) => {
-      // mousedown not click — click fires after blur, which would have
-      // already hidden the dropdown.
-      e.preventDefault();
-      const row = searchRows[+el.dataset.index];
-      if (row) selectSearchRow(row);
-    });
+function setSearchActive(idx) {
+  if (idx === searchActiveIndex) return;
+  searchActiveIndex = idx;
+  const out = document.getElementById('search-results');
+  out.querySelectorAll('.search-result').forEach((node) => {
+    const i = node.dataset.index !== undefined ? +node.dataset.index : -1;
+    node.classList.toggle('is-active', i === idx);
   });
 }
 
@@ -1002,6 +1031,7 @@ function selectSearchRow(row) {
   // Expand inline: replace the dropdown content with one row per matching
   // parcel so the user can disambiguate condos by TMK.
   const out = document.getElementById('search-results');
+  searchSubFeatures = features;
   out.innerHTML = features.map((f, i) => {
     const p = f.properties;
     const meta = [`TMK ${p.tmk}`, p.land_use, p.area_ac ? `${(+p.area_ac).toFixed(2)} ac` : null]
@@ -1013,31 +1043,38 @@ function selectSearchRow(row) {
       </div>
     </div>`;
   }).join('');
-  out.querySelectorAll('.search-result').forEach((el) => {
-    el.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      const f = features[+el.dataset.i];
-      if (f) {
-        flyToFeature(f);
-        closeSearchDropdown(true);
-      }
-    });
-  });
 }
 
 function flyToFeature(feature) {
-  const center = centroidOfFeature(feature);
+  const bbox = bboxOfFeature(feature);
+  const center = bbox ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : centroidOfFeature(feature);
   if (!center) return;
+  // Highlight the target parcel so the user sees what they selected even
+  // before the camera lands.
+  selectedTmk = feature.properties?.tmk ?? null;
+  refreshLayer();
+
   const targetPitch = STATE.extrude ? 60 : 0;
-  map.flyTo({
-    center,
-    zoom: 17,
-    pitch: targetPitch,
-    duration: 700,
-    essential: true,
-  });
+  // fitBounds with padding ensures the parcel is on-screen at an appropriate
+  // zoom regardless of size. Cap maxZoom so tiny parcels don't go to z22.
+  if (bbox && (bbox[2] - bbox[0]) > 1e-6 && (bbox[3] - bbox[1]) > 1e-6) {
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+      padding: 120,
+      maxZoom: 18,
+      pitch: targetPitch,
+      duration: 700,
+      essential: true,
+    });
+  } else {
+    map.flyTo({
+      center,
+      zoom: 18,
+      pitch: targetPitch,
+      duration: 700,
+      essential: true,
+    });
+  }
   map.once('moveend', () => {
-    // Open the popup at the projected pixel position of the parcel center.
     try {
       const px = map.project(center);
       openPopup(feature.properties, px.x, px.y);
@@ -1051,6 +1088,7 @@ function closeSearchDropdown(clearInput) {
   out.innerHTML = '';
   searchRows = [];
   searchActiveIndex = -1;
+  searchSubFeatures = null;
   if (clearInput) {
     const inp = document.getElementById('search-input');
     inp.value = '';
@@ -1074,14 +1112,12 @@ function wireAddressSearch() {
     if (['ArrowDown','ArrowUp','Enter','Escape'].includes(e.key)) {
       e.stopPropagation();
     }
-    if (e.key === 'ArrowDown' && searchRows.length) {
+    if (e.key === 'ArrowDown' && searchRows.length && !searchSubFeatures) {
       e.preventDefault();
-      searchActiveIndex = (searchActiveIndex + 1) % searchRows.length;
-      renderSearchResults();
-    } else if (e.key === 'ArrowUp' && searchRows.length) {
+      setSearchActive((searchActiveIndex + 1) % searchRows.length);
+    } else if (e.key === 'ArrowUp' && searchRows.length && !searchSubFeatures) {
       e.preventDefault();
-      searchActiveIndex = (searchActiveIndex - 1 + searchRows.length) % searchRows.length;
-      renderSearchResults();
+      setSearchActive((searchActiveIndex - 1 + searchRows.length) % searchRows.length);
     } else if (e.key === 'Enter') {
       const row = searchRows[searchActiveIndex];
       if (row) {
@@ -1097,6 +1133,35 @@ function wireAddressSearch() {
     if (input.value.trim().length >= 2 && searchRows.length) {
       out.hidden = false;
     }
+  });
+
+  // Delegated handlers on the dropdown container — listeners survive every
+  // re-render, so clicks always fire even when innerHTML was just replaced.
+  // Using mousedown (not click) because click fires after blur, by which
+  // point the dropdown may already be hidden.
+  out.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.search-result');
+    if (!el || !out.contains(el)) return;
+    e.preventDefault();
+    if (searchSubFeatures && el.dataset.i !== undefined) {
+      const f = searchSubFeatures[+el.dataset.i];
+      if (f) {
+        flyToFeature(f);
+        closeSearchDropdown(true);
+      }
+      return;
+    }
+    if (el.dataset.index !== undefined) {
+      const row = searchRows[+el.dataset.index];
+      if (row) selectSearchRow(row);
+    }
+  });
+
+  out.addEventListener('mousemove', (e) => {
+    if (searchSubFeatures) return;
+    const el = e.target.closest('.search-result');
+    if (!el || el.dataset.index === undefined) return;
+    setSearchActive(+el.dataset.index);
   });
 
   // Click outside closes the dropdown. Use mousedown so the dropdown's own
@@ -1373,6 +1438,36 @@ function escapeAttr(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// Body-level tooltip for metric (Revenue / Cost / Net) buttons in the
+// sidepanel. Pure-CSS ::after was clipped by #sidebar's overflow-y:auto.
+const segTooltipEl = document.getElementById('seg-tooltip');
+function wireSegTooltip() {
+  const toggle = document.getElementById('mode-toggle');
+  if (!toggle || !segTooltipEl) return;
+  toggle.addEventListener('mouseover', (e) => {
+    const btn = e.target.closest('.seg-btn[data-tooltip]');
+    if (!btn) return;
+    segTooltipEl.textContent = btn.dataset.tooltip;
+    segTooltipEl.classList.add('is-visible');
+    const r = btn.getBoundingClientRect();
+    const tipW = segTooltipEl.offsetWidth  || 220;
+    const tipH = segTooltipEl.offsetHeight || 60;
+    // Prefer centered above the button; clamp to viewport edges.
+    let x = r.left + r.width / 2 - tipW / 2;
+    x = Math.max(8, Math.min(x, window.innerWidth - tipW - 8));
+    let y = r.top - tipH - 10;
+    if (y < 8) y = r.bottom + 10;
+    segTooltipEl.style.left = x + 'px';
+    segTooltipEl.style.top  = y + 'px';
+  });
+  toggle.addEventListener('mouseout', (e) => {
+    const btn = e.target.closest('.seg-btn[data-tooltip]');
+    if (!btn) return;
+    if (e.relatedTarget && btn.contains(e.relatedTarget)) return;
+    segTooltipEl.classList.remove('is-visible');
+  });
 }
 
 // Body-level tooltip for the summary's "Total revenue" / "Total cost" rows.
