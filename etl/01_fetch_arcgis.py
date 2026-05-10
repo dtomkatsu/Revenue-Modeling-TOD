@@ -39,8 +39,11 @@ LAYERS: dict[str, str] = {
     "rail_transit_station_footprint":       "cchnl::rail-transit-station-footprint",
     "rail_transit_guideway_alignment_line": "cchnl::rail-transit-guideway-alignment-line",
     "land_use_oahu":                        "cchnl::2017_lud_oahu",
-    "road_centerlines":                     "cchnl::centerlines_haw",
+    "road_centerlines":                     "cchnl::oahu-street-centerlines",
     "address_points":                       "cchnl::address-points-1",
+    # All 16 special districts (Chinatown, Diamond Head, Haleiwa, etc.) —
+    # the 6 TOD records get filtered out downstream in etl/04.
+    "zoning_special_districts":             "cchnl::zoning-special-district",
 }
 
 # BWS sewer/water — try a few likely slugs; published Honolulu BWS layers

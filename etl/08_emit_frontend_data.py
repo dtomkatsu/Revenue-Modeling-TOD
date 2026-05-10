@@ -317,6 +317,11 @@ def emit_frontend(*, force: bool) -> int:
         "cost_om_per_ac", "cip_per_ac", "cost_per_ac", "net_per_ac",
         "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
         "assessed_value", "land_use", "address", "landlocked",
+        # Walking-distance + TOD-zoning attributes from etl/05 + etl/05b.
+        # walk_dist_ft is the road-network shortest-path distance to the
+        # nearest operating station (via Honolulu's street centerlines).
+        # in_tod_area flags parcels inside an adopted TOD Special District.
+        "walk_dist_ft", "nearest_station_id", "in_tod_area",
     ]
     station_lists = (
         merged.groupby("tmk")["station_id"]

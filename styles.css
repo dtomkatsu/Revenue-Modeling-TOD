@@ -422,6 +422,40 @@ select, button, input {
   box-shadow: 0 0 0 4px rgba(107, 158, 120, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+/* TOD-scope (walking-distance) slider — single-thumb. The label + value
+   sit side-by-side above the slider, mimicking the dual-range filter rows. */
+.walk-dist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.walk-dist-head label {
+  /* Re-assert the section-label styling because we're replacing a bare label
+     with a flex container holding the label and the value chip. */
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: var(--c-teal) !important;
+  margin: 0 !important;
+}
+.walk-dist-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--c-teal);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(107, 158, 120, 0.10);
+  border: 1px solid rgba(107, 158, 120, 0.22);
+}
+.walk-dist-help {
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
 /* Dual-thumb range. Two range inputs are stacked over a shared track. The
    trick: pointer-events:none on the inputs (so both don't block each
    other), pointer-events:auto on the thumbs only. JS positions
@@ -1112,6 +1146,24 @@ select, button, input {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   font-weight: 500;
+}
+/* TOD-zoned tag — small outlined chip in the popup sub-line, signalling
+   that the parcel sits inside an adopted Honolulu TOD Special District.
+   Outline-only (no fill) keeps it subtle so it doesn't compete with the
+   primary metric values; uppercase + tracking gives it official feel. */
+.parcel-popup__tod-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8FB89A;
+  border: 1px solid rgba(143, 184, 154, 0.55);
+  background: transparent;
+  vertical-align: 1px;
 }
 .parcel-popup__close {
   position: absolute;

@@ -6,9 +6,13 @@ Interactive map of Honolulu's Skyline rail corridor showing per-parcel
 6-year-average CIP), inspired by
 [Urban3's revenue-modeling methodology](https://www.urbanthree.com/services/revenue-modeling/).
 
-**v1 scope**: all 13 currently operating Skyline stations (Segments 1+2, west to east —
-Kualakaʻi through Kahauiki/Middle Street). Each station's catchment is a 0.5-mile
-straight-line walkshed buffer around the station point.
+**Scope**: all 13 currently operating Skyline stations (Segments 1+2, west to east —
+Kualakaʻi through Kahauiki/Middle Street). The dataset envelope is the union of
+Honolulu's adopted TOD Special District boundaries (6 polygons, stations 4–9) and
+a 1.6-mi straight-line buffer around every station. The frontend has a "TOD scope"
+slider (0.25–1.5 mi, 0.05-mi increments) that filters parcels by **road-network
+walking distance** to the nearest station; TOD-zoned parcels remain visible
+regardless of slider position.
 
 The output is a static MapLibre GL JS site backed by reproducible Python ETL,
 hostable on GitHub Pages.
@@ -68,8 +72,9 @@ pipeline_run.py # orchestrator (runs steps 01–08; step 09 is manual)
 | 02 | `etl/02_fetch_budget_pdfs.py` | Download FY26 budget PDFs | Yes |
 | 03 | `etl/03_extract_budget_totals.py` | Extract O&M totals from operating PDF | Yes |
 | 03b | `etl/03b_extract_cip_totals.py` | Extract CIP totals from capital PDF (6yr-avg) | Yes |
-| 04 | `etl/04_build_walksheds.py` | 0.5-mile station walksheds | Yes |
-| 05 | `etl/05_join_parcels.py` | Spatial join parcels → walksheds | Yes |
+| 04 | `etl/04_build_tod_areas.py` | Adopted TOD Special District polygons | Yes |
+| 05 | `etl/05_join_parcels.py` | Spatial join parcels → TOD ∪ 1.6-mi station buffer | Yes |
+| 05b | `etl/05b_walking_distances.py` | Road-network walking distance per parcel | Yes |
 | 06 | `etl/06_compute_revenue.py` | Property tax per acre | Yes |
 | 07 | `etl/07_compute_frontage_costs.py` | Infrastructure cost per acre | Yes |
 | 08 | `etl/08_emit_frontend_data.py` | Emit `data/parcels_tod.geojson` + `stations.geojson` | Yes |

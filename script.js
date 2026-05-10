@@ -69,6 +69,11 @@ const STATE = {
   taxRange:      [0, 100],
   assessedMax: 0,       // 99th-pct of assessed_value across all parcels
   taxMax: 0,            // 99th-pct of (rev_per_ac × area_ac)
+  // TOD scope: max walking distance (in MILES) from a station for a parcel
+  // to be visible. Parcels inside an adopted TOD Special District remain
+  // visible regardless. Parcels with null walk_dist_ft (unreachable on the
+  // street network) are kept too — slider is "max", not "exclude unknown".
+  walkDistMaxMi: 1.5,
   typeSelections: new Set(DEFAULT_TYPE_SELECTIONS),
   addressIndex: null,   // Map<normalizedAddress, Feature[]>
   sidebarCollapsed: false,
@@ -473,11 +478,15 @@ function buildPopupHTML(p) {
   if (p.land_use) subParts.push(escapeHTML(String(p.land_use)));
   const stationNames = resolveStationNames(p.station_ids);
 
+  const todTag = p.in_tod_area
+    ? `<span class="parcel-popup__tod-tag" title="This parcel sits inside an adopted TOD Special District (Honolulu DPP).">TOD-zoned</span>`
+    : '';
   return `
     <div class="parcel-popup__head">
       <button class="parcel-popup__close" aria-label="Close">×</button>
       <div class="parcel-popup__title">${escapeHTML(addr ?? p.tmk ?? 'Parcel')}</div>
-      ${subParts.length ? `<div class="parcel-popup__sub">${subParts.join(' · ')}</div>` : ''}
+      ${subParts.length ? `<div class="parcel-popup__sub">${subParts.join(' · ')} ${todTag}</div>`
+                        : (todTag ? `<div class="parcel-popup__sub">${todTag}</div>` : '')}
     </div>
 
     <div class="parcel-popup__section">
@@ -502,6 +511,7 @@ function buildPopupHTML(p) {
     <div class="parcel-popup__section">
       <h3>Physical</h3>
       ${hasAcres ? `<div class="parcel-popup__row"><span class="k">Area</span><span class="v">${acres.toFixed(2)} ac</span></div>` : ''}
+      ${Number.isFinite(+p.walk_dist_ft) ? `<div class="parcel-popup__row"><span class="k">Walk to nearest station</span><span class="v">${(+p.walk_dist_ft / 5280).toFixed(2)} mi</span></div>` : ''}
       <div class="parcel-popup__row"><span class="k">Road frontage</span><span class="v">${fmtFt(p.frontage_road_ft)}</span></div>
       <div class="parcel-popup__row"><span class="k">Sewer frontage</span><span class="v">${fmtFt(p.frontage_sewer_ft)}</span></div>
       <div class="parcel-popup__row"><span class="k">Water frontage</span><span class="v">${fmtFt(p.frontage_water_ft)}</span></div>
@@ -701,6 +711,22 @@ function wireUI() {
   wireRangeFilter('assessed', 'assessedRange');
   wireRangeFilter('tax',      'taxRange');
 
+  // TOD-scope walking-distance slider — single-thumb, value in miles.
+  const walkSlider = document.getElementById('walk-dist-slider');
+  const walkValEl  = document.getElementById('walk-dist-val');
+  if (walkSlider && walkValEl) {
+    const updateWalkVal = () => {
+      const mi = +walkSlider.value;
+      STATE.walkDistMaxMi = mi;
+      walkValEl.textContent = mi.toFixed(2).replace(/0$/, '') + ' mi';
+    };
+    walkSlider.addEventListener('input', () => {
+      updateWalkVal();
+      refresh();
+    });
+    updateWalkVal();
+  }
+
   // Property-type checkboxes — each maps to a bucket key in
   // STATE.typeSelections (a Set). Public Service starts unchecked per the
   // asymmetric default; reset restores DEFAULT_TYPE_SELECTIONS.
@@ -720,6 +746,11 @@ function wireUI() {
     document.getElementById('assessed-max-input').value = 100;
     document.getElementById('tax-min').value            = 0;
     document.getElementById('tax-max-input').value      = 100;
+    STATE.walkDistMaxMi = 1.5;
+    const walkSliderEl = document.getElementById('walk-dist-slider');
+    const walkValElReset = document.getElementById('walk-dist-val');
+    if (walkSliderEl) walkSliderEl.value = 1.5;
+    if (walkValElReset) walkValElReset.textContent = '1.5 mi';
     STATE.typeSelections = new Set(DEFAULT_TYPE_SELECTIONS);
     document.querySelectorAll('.type-check input[type=checkbox]').forEach((cb) => {
       cb.checked = STATE.typeSelections.has(cb.dataset.bucket);
@@ -1222,7 +1253,8 @@ function updateFilterUI() {
   const rangesActive =
     STATE.assessedRange[0] !== 0 || STATE.assessedRange[1] !== 100 ||
     STATE.taxRange[0]      !== 0 || STATE.taxRange[1]      !== 100;
-  const active = rangesActive || !typesAreDefault;
+  const walkActive = STATE.walkDistMaxMi < 1.5;
+  const active = rangesActive || !typesAreDefault || walkActive;
 
   document.getElementById('filter-reset').hidden = !active;
   document.getElementById('filter-count').textContent = active
@@ -1263,11 +1295,20 @@ function refresh() {
   const [txLo, txHi] = thresholdRange(STATE.taxRange,      STATE.taxMax);
   const types = STATE.typeSelections;
   const allTypesSelected = types.size === Object.keys(LAND_USE_BUCKETS).length;
+  // walk_dist_ft is in feet; slider is in miles.
+  const walkMaxFt = STATE.walkDistMaxMi * 5280;
 
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
     const p = f.properties;
     if (filterSid !== null && !(p?.station_ids || []).includes(filterSid)) return false;
     if (!Number.isFinite(+p?.[colorKey])) return false;
+    // TOD scope: parcels in adopted TOD areas always pass; otherwise check
+    // walking distance. Parcels with null walk_dist_ft (unreachable, ~10
+    // out of 19,872) are kept so the slider can't silently drop them.
+    if (!p?.in_tod_area) {
+      const wd = +p?.walk_dist_ft;
+      if (Number.isFinite(wd) && wd > walkMaxFt) return false;
+    }
     const av = +p?.assessed_value;
     if (avLo > 0 && !(av >= avLo)) return false;
     if (avHi !== Infinity && !(av <= avHi)) return false;

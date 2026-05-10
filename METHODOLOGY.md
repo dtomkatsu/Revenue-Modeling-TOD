@@ -128,40 +128,62 @@ script version.
 02_fetch_budget_pdfs   → data/raw/budget/*.pdf
 03_extract_budget_totals → data/processed/budget_totals.json    (O&M road/sewer/water)
 03b_extract_cip_totals → data/processed/cip_totals.json         (CIP road/sewer/water, 6yr-avg)
-04_build_walksheds     → data/processed/walksheds.geojson  (13 polygons, 1-mi buffer)
-05_join_parcels        → data/processed/parcels_in_walksheds.geojson
+04_build_tod_areas     → data/processed/tod_areas.geojson  (6 adopted TOD Special Districts)
+05_join_parcels        → data/processed/parcels_in_walksheds.geojson  (envelope = TOD ∪ 1.6-mi station buffer)
+05b_walking_distances  → in-place: adds walk_dist_ft + nearest_station_id via NetworkX on Oahu Street Centerlines
 06_compute_revenue     → data/processed/parcels_revenue.geojson  (rev_per_ac per parcel)
    (in v1, supplanted by fix_revenue.py — see §5)
 07_compute_frontage_costs → data/processed/parcels_costs.geojson  (cost_om_per_ac, cip_per_ac, cost_per_ac per parcel)
 08_emit_frontend_data  → data/parcels_tod.geojson + data/stations.geojson  (committed)
 ```
 
+`etl/04_build_walksheds.py` (legacy 1-mi straight-line walksheds) is preserved
+for reference but no longer wired into the pipeline.
+
 The frontend (`index.html` + `script.js` + `styles.css`) consumes only the
 two committed `data/*.geojson` files.
 
 ---
 
-## 3. Catchment definition (walkshed)
+## 3. Catchment definition (TOD scope)
 
-Each of the 13 operating Skyline stations gets a **1.0-mile straight-line
-buffer** around its centroid (radius = 1,609.344 m), computed in EPSG:32604
-(UTM Zone 4N, meters).
+The dataset envelope is the **union** of two source polygons:
 
-This **overstates** the real walkable area:
-- Real walking distance follows the street network, not straight lines.
-- Obstacles (the H-1, the rail guideway itself, gulches) interrupt walksheds.
-- Topography matters — a 1-mi straight line up Punchbowl is not equivalent
-  to a 1-mi straight line on flat Waipahu.
+1. **Honolulu's adopted TOD Special District boundaries** (from
+   `cchnl::zoning-special-district`, filtered to the 6 records named
+   `Transit-Oriented Development Special District`). These cover the central
+   stretch of the line (stations 4–9: Hoʻaeʻae through Hālawa). Stations
+   1–3 (East Kapolei area) and 10–13 (Pearl Harbor → Middle Street) are
+   **not** inside any adopted TOD district as of FY26.
 
-A parcel touching multiple station walksheds is **duplicated** in
-`parcels_in_walksheds.geojson` (one row per station), so total parcel-rows
-(25,834) exceeds unique parcels (19,872). The cost computation deduplicates
-on TMK (frontage doesn't depend on which station a parcel sits in); the
-frontend uses the duplicated rows for per-station filtering.
+2. **A 1.6-mile straight-line buffer** around each of the 13 operating
+   stations (computed in EPSG:32604, UTM Zone 4N, meters). 1.6 mi is
+   chosen to safely contain every parcel that could fall within the
+   frontend's 1.5-mi walking-distance slider — typical walk-route detour
+   factors are 1.05-1.20×.
+
+A parcel is included iff it intersects this union. Each parcel carries:
+
+- `in_tod_area` (bool) — flagged in the popup with a "TOD-zoned" tag.
+- `walk_dist_ft` — actual road-network shortest-path distance to nearest
+  operating station, computed in `etl/05b_walking_distances.py` via
+  NetworkX on Honolulu DPP's Oahu Street Centerlines layer
+  (`cchnl::oahu-street-centerlines`, ~27k segments). Highway-class roads
+  (street_class = 1, e.g. H-1) are excluded since pedestrians can't use
+  them. Distances are computed in EPSG:2783 (HI State Plane Z3, US-survey-
+  feet).
+- `nearest_station_id` (int) — the station that minimises walk_dist_ft.
+
+The **frontend "TOD scope" slider** (default: 1.5 mi) filters parcels by
+`walk_dist_ft`. Parcels with `in_tod_area = true` always pass the filter
+regardless of slider position — they're shown for analytical context even
+when far from a station by walking. Parcels whose centroid couldn't snap
+to the road network (~10 of 19,872, e.g. military complexes) are also
+kept so the slider can't silently drop them.
 
 **v2 upgrades** (in priority order):
-1. Switch to `cchnl::tod-special-district` — the City's adopted boundaries
-   (7 features available).
+1. ~~Switch to `cchnl::tod-special-district`~~ — done.
+2. ~~Switch to road-network walking distance~~ — done.
 2. Compute walking-network catchments via `osmnx` + OSM road network.
 3. Account for the rail guideway, freeway, and gulch barriers explicitly.
 
