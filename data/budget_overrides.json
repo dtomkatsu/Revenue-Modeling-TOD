@@ -1,6 +1,6 @@
 {
-  "_notes": "Manual overrides for line items pdfplumber can't parse. Any non-null value here wins over the value extracted from the City budget PDFs in step 03. The Board of Water Supply is semi-autonomous — its FY26 water-system O&M total is not in the City Operating Budget PDF and is loaded here from the BWS FY26 Combined Op+CIP budget book. water_om_total_usd = $362,439,988 (Total Operating Expenditures, FY26 post-Amendment #4 dated 2026-01-14; this is total operating expenditures and is correctly disjoint from the $79.1M operating-funded slice of CIP — that capital outlay is captured in cip_overrides.json water_cip_total_usd). Source: https://www.boardofwatersupply.com/media/ytfd1egf/bws-budget-2025-2026.pdf and https://www.boardofwatersupply.com/media/w3jle0xy/2026-01-14-fy-2026-budget-amendment-no-4.pdf. Retrieved 2026-05-08.",
+  "_notes": "Manual overrides for line items pdfplumber can't parse. Any non-null value here wins over both the City PDF extraction (step 03) and the auto-extracted BWS defaults (data/processed/bws_totals.json from etl/03c, Tier 2). BWS water_om is now auto-extracted by etl/02b + etl/03c from https://www.boardofwatersupply.com/department-financial-statements/ — Tier 1 manual entry cleared 2026-05-11. Override is preserved as an escape hatch for parser breakage.",
   "road_om_total_usd": null,
   "sewer_om_total_usd": null,
-  "water_om_total_usd": 362439988
+  "water_om_total_usd": null
 }
