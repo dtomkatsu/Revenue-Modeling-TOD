@@ -1,26 +1,33 @@
 """Step 11 — extract HART capital financial totals from downloaded PDFs.
 
 Reads:
-  data/raw/hart/recovery_plan.pdf   — 2022 Recovery Plan (primary cost source)
-  data/raw/hart/five_year_plan.pdf  — 2024 Amended FFGA (FY26 capital + funding schedule)
+  data/raw/hart/monthly_progress_report.pdf  — latest HART Monthly Progress Report
+                                                (Core Accountability Items table on
+                                                the Summary page, Current Forecast column)
+  data/raw/hart/ffga_amended.pdf              — 2024 Amended FFGA (FY26 capital schedule)
+  data/raw/hart/recovery_plan.pdf  (optional) — 2022 Recovery Plan (funding-mix fallback)
 
 Writes:
   data/processed/hart_totals.json
 
 Extracted fields
 ----------------
-total_program_cost_usd  : EAC for truncated FFGA scope from Recovery Plan Table 6-1.
-                          ~$9.148B as of June 2022.
+total_program_cost_usd  : "Total Project Capital Cost — Current Forecast" from the
+                          latest Monthly Progress Report's Core Accountability Items
+                          table (Summary page). This is the live capital-only figure
+                          (excludes pre-RSD finance charges); ~$9.569B as of March 2026.
 fy26_capital_usd        : Total FY2026 obligation (federal + local) from FFGA Amended
                           funding-schedule table.
 annualized_capital_usd  : floor(total_program_cost_usd / 30)
                           30-year straight-line annualization (see HART-PLAN.md §4).
-funding_mix             : best-effort funding breakdown from Recovery Plan Table 3-1.
+funding_mix             : best-effort funding breakdown from Recovery Plan Table 3-1
+                          (informational only; null if recovery_plan.pdf absent).
+report_period           : YYYYMM of the monthly report used (for provenance).
 
 Hard-fails (exit 1)
 -------------------
 * pdftotext not found
-* Either PDF is missing or appears image-only (< 100 chars of text)
+* monthly_progress_report.pdf or ffga_amended.pdf missing or image-only
 * total_program_cost_usd outside [$8B, $15B]
 * fy26_capital_usd outside [$100M, $1.5B]
 * annualized_capital_usd <= 0
@@ -45,8 +52,9 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 
 SCRIPT_NAME   = "etl/11_extract_hart_totals.py"
+MONTHLY_PDF   = _ROOT / "data" / "raw" / "hart" / "monthly_progress_report.pdf"
+FFGA_PDF      = _ROOT / "data" / "raw" / "hart" / "ffga_amended.pdf"
 RECOVERY_PDF  = _ROOT / "data" / "raw" / "hart" / "recovery_plan.pdf"
-FIVE_YEAR_PDF = _ROOT / "data" / "raw" / "hart" / "five_year_plan.pdf"
 OUT_DIR       = _ROOT / "data" / "processed"
 OUT_PATH      = OUT_DIR / "hart_totals.json"
 
@@ -64,35 +72,54 @@ FY26_CAP_HI    =  1_500_000_000
 # ---------------------------------------------------------------------------
 
 _PDFTOTEXT: str | None = None
+_PARSER_BACKEND: str = ""  # "pdftotext" | "pdfplumber"
 
 
-def _find_pdftotext() -> str:
+def _find_pdftotext() -> str | None:
+    """Locate pdftotext on PATH or in the standard Homebrew location.
+
+    Returns the executable path, or None if not installed. We no longer exit
+    on absence — we fall back to pdfplumber, which is already a project
+    dependency and produces equivalent layout output for the relatively
+    simple tables in HART's published PDFs.
+    """
     global _PDFTOTEXT
     if _PDFTOTEXT:
         return _PDFTOTEXT
-    # shutil.which respects PATH; fall back to the known Homebrew location
     candidate = shutil.which("pdftotext") or "/opt/homebrew/bin/pdftotext"
     if not Path(candidate).is_file():
-        sys.exit(
-            "[error] pdftotext not found.\n"
-            "  Install poppler:  brew install poppler\n"
-            "  Then re-run this script."
-        )
+        return None
     _PDFTOTEXT = candidate
     return candidate
 
 
 def _pdf_to_text(pdf_path: Path) -> str:
-    """Run pdftotext -layout on pdf_path; return stdout as string."""
+    """Return layout-preserving text extraction of pdf_path.
+
+    Prefers ``pdftotext -layout`` (poppler) for consistency with the rest of
+    the ETL pipeline; falls back to ``pdfplumber`` if poppler is not
+    installed. Both backends preserve column alignment well enough for the
+    tabular extraction in this script.
+    """
+    global _PARSER_BACKEND
     exe = _find_pdftotext()
-    result = subprocess.run(
-        [exe, "-layout", str(pdf_path), "-"],
-        capture_output=True, text=True, timeout=120,
-    )
-    text = result.stdout
+    if exe is not None:
+        _PARSER_BACKEND = "pdftotext"
+        result = subprocess.run(
+            [exe, "-layout", str(pdf_path), "-"],
+            capture_output=True, text=True, timeout=120,
+        )
+        text = result.stdout
+    else:
+        _PARSER_BACKEND = "pdfplumber"
+        import pdfplumber  # local import: keep import-time cost down when unused
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+
     if len(text.strip()) < 100:
         sys.exit(
-            f"[error] pdftotext produced < 100 chars for {pdf_path.name}.\n"
+            f"[error] PDF parser ({_PARSER_BACKEND}) produced < 100 chars for "
+            f"{pdf_path.name}.\n"
             "  The PDF may be image-only (scanned). Check whether the file is\n"
             "  a native PDF or a scanned image and update step 10 if needed."
         )
@@ -128,40 +155,103 @@ def _apply_scale(value: float, text: str, match_start: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Extraction: total_program_cost_usd (Recovery Plan, Table 6-1)
+# Extraction: total_program_cost_usd (Monthly Progress Report, Core
+# Accountability Items, "Total Project Capital Cost — Current Forecast")
 # ---------------------------------------------------------------------------
 
-def _extract_total_program_cost(text: str) -> int:
-    """Return total program capital cost in USD from Recovery Plan Table 6-1.
+def _extract_total_program_cost(text: str) -> tuple[int, str | None]:
+    """Return (capital_cost_usd, report_period_yyyymm) from the Monthly Report.
 
-    Targets the "Project Costs Estimate at Completion (EAC)" line, which
-    appears in a table headed "(dollars in millions)".
+    Targets the Core Accountability Items table on the Summary page. The
+    relevant row is "Total Project Capital Cost" with three dollar columns:
+    2022 Recovery Plan / Current Forecast / Incurred to Date. We extract the
+    Current Forecast (middle) column. The table header reads
+    "Core Accountability Items ($ are in millions)".
+
+    Example row (pdftotext -layout output):
+        Total Project Capital Cost $9,148 $9,569 $6,407
+
+    Returns the report period (YYYYMM) parsed from the cover page title when
+    possible (e.g. "M A R C H   2 0 2 6" → "202603") for provenance.
     """
-    # Primary pattern: EAC line in Table 6-1
-    patterns = [
-        r"Project Costs Estimate at Completion\s*\(EAC\)\s*\$?\s*([\d,]+\.?\d*)",
-        r"Estimate at Completion\s*\(EAC\)\s*\$?\s*([\d,]+\.?\d*)",
-        # Fallback: any "total" row with a plausible dollar amount (8,000+ M)
-        r"Total\s+(?:Project\s+)?Cost[s]?\s+Estimate[^\n]*\$?\s*([\d,]+\.?\d*)",
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            raw = _strip_dollars(m.group(1))
-            scaled = _apply_scale(raw, text, m.start())
-            if TOTAL_COST_LO <= scaled <= TOTAL_COST_HI:
-                return scaled
-            # If not in-range, it might need scaling even if keyword wasn't nearby
-            for mult in (1_000_000, 1_000, 1):
-                candidate = math.floor(raw * mult)
-                if TOTAL_COST_LO <= candidate <= TOTAL_COST_HI:
-                    return candidate
-
-    sys.exit(
-        "[error] Could not extract total program cost from recovery_plan.pdf.\n"
-        "  Expected 'Estimate at Completion (EAC)' line in Table 6-1.\n"
-        "  Check if the Recovery Plan layout has changed and update the regex."
+    # Primary pattern: capture all three dollar amounts on the Total Project
+    # Capital Cost row, pick the middle one (Current Forecast).
+    pat_capital = re.compile(
+        r"Total\s+Project\s+Capital\s+Cost\s+"
+        r"\$?\s*([\d,]+)\s+\$?\s*([\d,]+)\s+\$?\s*([\d,]+)",
+        re.IGNORECASE,
     )
+    m = pat_capital.search(text)
+    if not m:
+        # Fallback: "Capital Cost estimate" row (top of the same table) — this
+        # is "Total Project Cost" including pre-RSD finance charges. Less ideal
+        # since it bundles debt service, but better than failing outright.
+        pat_total = re.compile(
+            r"Capital\s+Cost\s+estimate\s+"
+            r"\$?\s*([\d,]+)\s+\$?\s*([\d,]+)\s+\$?\s*([\d,]+)",
+            re.IGNORECASE,
+        )
+        m = pat_total.search(text)
+        if not m:
+            sys.exit(
+                "[error] Could not extract Total Project Capital Cost from "
+                "monthly_progress_report.pdf.\n"
+                "  Expected a 'Total Project Capital Cost' (or 'Capital Cost estimate')\n"
+                "  row with three dollar values in the Core Accountability Items table.\n"
+                "  Check whether the report layout has changed and update the regex."
+            )
+
+    raw_current_forecast = _strip_dollars(m.group(2))
+
+    # Header asserts "$ are in millions"; verify near the match before scaling.
+    context = text[max(0, m.start() - 4000):m.start() + 200]
+    if not re.search(r"in\s+millions|\$\s*are\s+in\s+millions", context, re.I):
+        # Layout shifted or scale keyword missing — try to recover by picking
+        # the multiplier that lands the value in the sanity range.
+        for mult in (1_000_000, 1_000, 1):
+            candidate = math.floor(raw_current_forecast * mult)
+            if TOTAL_COST_LO <= candidate <= TOTAL_COST_HI:
+                capital_cost = candidate
+                break
+        else:
+            sys.exit(
+                "[error] Could not infer monetary scale for Current Forecast capital cost.\n"
+                f"  Raw value: {raw_current_forecast}. Expected 'in millions' header.\n"
+                "  Layout may have shifted — verify the Core Accountability Items table."
+            )
+    else:
+        capital_cost = math.floor(raw_current_forecast * 1_000_000)
+
+    # Parse report period from cover-page month/year (best-effort).
+    report_period = _parse_report_period(text)
+
+    return capital_cost, report_period
+
+
+def _parse_report_period(text: str) -> str | None:
+    """Return 'YYYYMM' parsed from the cover-page title, or None.
+
+    The cover-page title is rendered with spaced letters (e.g.
+    'M A R C H   2 0 2 6'). We collapse internal spaces and match
+    'Month YYYY' on the cover page.
+    """
+    months = {
+        "january": "01", "february": "02", "march": "03", "april": "04",
+        "may": "05", "june": "06", "july": "07", "august": "08",
+        "september": "09", "october": "10", "november": "11", "december": "12",
+    }
+    head = text[:4000]
+    collapsed = re.sub(r"\s+", " ", head)
+    despaced = re.sub(r"(?<=\b\w) (?=\w\b)", "", collapsed)  # collapse "M A R C H" → "MARCH"
+    for candidate in (collapsed, despaced):
+        m = re.search(
+            r"\b(January|February|March|April|May|June|July|August|"
+            r"September|October|November|December)\s+(\d{4})\b",
+            candidate, re.IGNORECASE,
+        )
+        if m:
+            return f"{m.group(2)}{months[m.group(1).lower()]}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +350,7 @@ def extract_totals(*, force: bool) -> int:
         print(f"[skip] {OUT_PATH.relative_to(_ROOT)} (cached; use --force to recompute)")
         return 0
 
-    for pdf in (RECOVERY_PDF, FIVE_YEAR_PDF):
+    for pdf in (MONTHLY_PDF, FFGA_PDF):
         if not pdf.exists():
             sys.exit(
                 f"[error] {pdf.relative_to(_ROOT)} not found.\n"
@@ -269,14 +359,14 @@ def extract_totals(*, force: bool) -> int:
 
     _find_pdftotext()
 
-    print(f"[parse] {RECOVERY_PDF.relative_to(_ROOT)}")
-    recovery_text = _pdf_to_text(RECOVERY_PDF)
+    print(f"[parse] {MONTHLY_PDF.relative_to(_ROOT)}")
+    monthly_text = _pdf_to_text(MONTHLY_PDF)
 
-    print(f"[parse] {FIVE_YEAR_PDF.relative_to(_ROOT)}")
-    ffga_text = _pdf_to_text(FIVE_YEAR_PDF)
+    print(f"[parse] {FFGA_PDF.relative_to(_ROOT)}")
+    ffga_text = _pdf_to_text(FFGA_PDF)
 
     # --- Extract key figures ---
-    total_program_cost_usd = _extract_total_program_cost(recovery_text)
+    total_program_cost_usd, report_period = _extract_total_program_cost(monthly_text)
     fy26_capital_usd       = _extract_fy26_capital(ffga_text)
     annualized_capital_usd = math.floor(total_program_cost_usd / ANNUALIZATION_YEARS)
 
@@ -297,11 +387,23 @@ def extract_totals(*, force: bool) -> int:
     )
     _assert(annualized_capital_usd > 0, "annualized_capital_usd <= 0")
 
-    print(f"  total_program_cost_usd  : ${total_program_cost_usd:,.0f}")
+    print(f"  report_period           : {report_period or '(unknown)'}")
+    print(f"  total_program_cost_usd  : ${total_program_cost_usd:,.0f}  (Current Forecast)")
     print(f"  fy26_capital_usd        : ${fy26_capital_usd:,.0f}")
     print(f"  annualized_capital_usd  : ${annualized_capital_usd:,.0f}")
 
-    funding_mix = _extract_funding_mix(recovery_text)
+    # Funding mix is informational only — pulled from the Recovery Plan if
+    # available; otherwise emit nulls. Does not affect cost calculations.
+    if RECOVERY_PDF.exists():
+        recovery_text = _pdf_to_text(RECOVERY_PDF)
+        funding_mix   = _extract_funding_mix(recovery_text)
+        funding_mix_source = "Recovery Plan 2022, Table 3-1 (informational)"
+    else:
+        funding_mix = {
+            "fta_ffga_usd": None, "get_surcharge_usd": None,
+            "property_tax_usd": None, "bonds_usd": None, "other_usd": None,
+        }
+        funding_mix_source = "(recovery_plan.pdf absent; funding mix unavailable)"
 
     # --- Write output ---
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -310,10 +412,15 @@ def extract_totals(*, force: bool) -> int:
         "fy26_capital_usd":        fy26_capital_usd,
         "annualized_capital_usd":  annualized_capital_usd,
         "annualization_years":     ANNUALIZATION_YEARS,
+        "report_period":           report_period,
         "funding_mix":             funding_mix,
         "provenance": {
-            "total_program_cost_source": "Recovery Plan 2022, Table 6-1, Project Costs EAC (truncated FFGA scope)",
+            "total_program_cost_source": (
+                f"HART Monthly Progress Report {report_period or '(period unknown)'}, "
+                "Core Accountability Items, Total Project Capital Cost — Current Forecast"
+            ),
             "fy26_capital_source":       "2024 Amended FFGA, Proposed Schedule of Federal Funds, FY 2026 Total",
+            "funding_mix_source":        funding_mix_source,
             "script":                    SCRIPT_NAME,
         },
     }

@@ -53,48 +53,52 @@ AJAX_URL     = "https://honolulutransit.org/wp-admin/admin-ajax.php"
 ACCOUNT_ID   = "dbid:AAB8fd0xcPFdfzX57KFNGkEvwbSfUu_3l3Y"
 OUT_DIR      = _ROOT / "data" / "raw" / "hart"
 
-# FTA Documents module's data-source attribute (stable identifier in page HTML)
-FTA_SOURCE_ID = "0fc67db660d63be01b01cc0812820a93"
+# data-source attributes for the OutoftheBox modules on the reports page.
+# These identify which Dropbox folder a module is rooted at and are stable
+# across page loads (the per-session `data-token` is captured at fetch time).
+FTA_SOURCE_ID     = "0fc67db660d63be01b01cc0812820a93"   # FTA Documents folder
+REPORTS_SOURCE_ID = "d69959bcd5858b64c6016db323462cd1"   # Year-folder browser (Monthly Progress Reports)
 
 # Hardcoded paths for documents whose locations are stable government records.
 # key = slug, value = (module_source_id, exact_dropbox_path)
 _KNOWN_PATHS: dict[str, tuple[str, str]] = {
+    # The 2024 Amended FFGA has the current federal funding schedule used to
+    # extract FY26 capital obligations (step 11).
+    "ffga_amended": (
+        FTA_SOURCE_ID,
+        "/FTA Documents/20240201 - Amended Full Funding Grant Agreement (FFGA).pdf",
+    ),
+    # The 2022 Recovery Plan is retained as a secondary source for funding-mix
+    # extraction (Table 3-1). It is NOT used for total program cost since the
+    # 2022 EAC has been superseded by the monthly "Current Forecast" column.
     "recovery_plan": (
         FTA_SOURCE_ID,
         "/FTA Documents/20220603 - HART 2022 Recovery Plan.pdf",
     ),
-    # The 2024 Amended FFGA is used as the five_year_plan proxy because HART no
-    # longer publishes a standalone Five-Year Financial Plan on their website.
-    # It has the updated total program budget and FY26 federal allocations.
-    "five_year_plan": (
-        FTA_SOURCE_ID,
-        "/FTA Documents/20240201 - Amended Full Funding Grant Agreement (FFGA).pdf",
-    ),
 }
 
 # Doc specs: (slug, output_filename, filename-patterns-for-dynamic-discovery)
-# Only annual_report relies on dynamic discovery; the other two use _KNOWN_PATHS.
+# The monthly_progress_report is found dynamically (latest YYYYMM in the
+# current/previous year folder); others use _KNOWN_PATHS.
 _DOC_SPECS: list[tuple[str, str, list[str]]] = [
+    (
+        "monthly_progress_report",
+        "monthly_progress_report.pdf",
+        [r"\d{6}.*monthly\s+progress\s+report.*low\s*res"],
+    ),
+    (
+        "ffga_amended",
+        "ffga_amended.pdf",
+        [r"amended.*ffga", r"amended.*full\s+funding"],
+    ),
     (
         "recovery_plan",
         "recovery_plan.pdf",
         [r"recovery\s+plan"],
     ),
-    (
-        "five_year_plan",
-        "five_year_plan.pdf",
-        [r"five.?year\s+financial\s+plan", r"5.?year\s+financial\s+plan",
-         r"five.?year.*plan"],
-    ),
-    (
-        "annual_report",
-        "annual_report.pdf",
-        [r"annual\s+report.*fy\s*\d+", r"fy\s*\d+.*annual\s+report",
-         r"annual\s+financial\s+report"],
-    ),
 ]
 
-MIN_REQUIRED = 2  # recovery_plan + five_year_plan are always available
+MIN_REQUIRED = 2  # monthly_progress_report + ffga_amended are required for step 11
 
 
 # ---------------------------------------------------------------------------
@@ -217,14 +221,57 @@ def _matches_any(name: str, patterns: list[str]) -> bool:
     return any(re.search(pat, name, re.IGNORECASE) for pat in patterns)
 
 
+def _find_latest_monthly_report(
+    token: str,
+    nonce: str,
+) -> tuple[str, str] | None:
+    """Locate the most recent Monthly Progress Report PDF.
+
+    Walks the year-folder browser (REPORTS_SOURCE_ID module): tries the current
+    year folder, then the previous year if the current year has no reports yet
+    (January edge case). Within a year folder, picks the file whose name has
+    the greatest YYYYMM prefix and contains "Monthly Progress Report - low res".
+
+    Returns (dropbox_path, filename) or None if nothing found.
+    """
+    from datetime import date
+
+    year = date.today().year
+    pat_low_res = re.compile(r"(\d{6}).*monthly\s+progress\s+report.*low\s*res",
+                              re.IGNORECASE)
+
+    for candidate_year in (year, year - 1):
+        folder_path = f"/{candidate_year}/"
+        entries = _list_folder(token, folder_path, nonce)
+        matches: list[tuple[str, str, str]] = []  # (yyyymm, name, dropbox_path)
+        for entry in entries:
+            if entry["type"] != "file":
+                continue
+            name = entry["name"]
+            m = pat_low_res.search(name)
+            if not m:
+                continue
+            yyyymm = m.group(1)
+            dpath = unquote(entry["url"]) if entry["url"] else f"{folder_path}{name}"
+            matches.append((yyyymm, name, dpath))
+        if matches:
+            matches.sort(reverse=True)  # latest YYYYMM first
+            yyyymm, name, dpath = matches[0]
+            print(f"  [latest] monthly_progress_report → {name!r} (YYYYMM={yyyymm})")
+            return dpath, name
+
+    return None
+
+
 def _discover_docs(
     modules: list[dict[str, str]],
     nonce: str | None,
 ) -> dict[str, tuple[str, str, str]]:
     """Return {slug: (download_url, dropbox_path, token)}.
 
-    First resolves hardcoded _KNOWN_PATHS, then attempts dynamic listing
-    for any remaining slugs (annual_report).
+    1. Resolves hardcoded _KNOWN_PATHS (ffga_amended, recovery_plan).
+    2. Dynamically discovers the latest monthly_progress_report by listing
+       the current-year folder in the year-folder browser module.
     """
     found: dict[str, tuple[str, str, str]] = {}
     source_to_token = {m["source"]: m["token"] for m in modules if m["source"]}
@@ -240,34 +287,21 @@ def _discover_docs(
         found[slug] = (url, dpath, token)
         print(f"  [known] {slug} → {dpath!r}")
 
-    if all(s in found for s, *_ in _DOC_SPECS):
-        return found
-
-    # Step 2: dynamic listing for remaining slugs (annual_report)
-    if not nonce:
-        print("  [warn]  No nonce found in page HTML; skipping dynamic listing")
-        return found
-
-    remaining = [(s, fn, pats) for s, fn, pats in _DOC_SPECS if s not in found]
-    for module in modules:
-        if not remaining:
-            break
-        token = module["token"]
-        entries = _list_folder(token, "/", nonce)
-        for entry in entries:
-            name = entry["name"]
-            url_encoded = entry["url"]
-            if not name.lower().endswith(".pdf"):
-                continue
-            # url_encoded is the URL-encoded dropbox path from data-url attribute
-            dpath = unquote(url_encoded)
-            for i, (slug, _fn, patterns) in enumerate(remaining):
-                if _matches_any(name, patterns):
-                    dl_url = _download_url(token, dpath)
-                    found[slug] = (dl_url, dpath, token)
-                    print(f"  [match] {slug} → {name!r}")
-                    remaining.pop(i)
-                    break
+    # Step 2: dynamic discovery of latest monthly progress report
+    reports_token = source_to_token.get(REPORTS_SOURCE_ID)
+    if not reports_token:
+        print(f"  [warn]  Module source={REPORTS_SOURCE_ID!r} not found in page; "
+              "cannot locate monthly_progress_report")
+    elif not nonce:
+        print("  [warn]  No nonce found in page HTML; cannot list year folders")
+    else:
+        result = _find_latest_monthly_report(reports_token, nonce)
+        if result:
+            dpath, _name = result
+            url = _download_url(reports_token, dpath)
+            found["monthly_progress_report"] = (url, dpath, reports_token)
+        else:
+            print("  [warn]  No monthly progress report found in current or previous year folder")
 
     return found
 

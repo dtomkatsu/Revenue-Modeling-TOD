@@ -39,36 +39,40 @@ files; can be worked in parallel.
 ### 2.1 Index page
 
 ```
-https://www.honolulutransit.org/about/financial-information/
+https://www.honolulutransit.org/about/reports-and-documents/
 ```
 
-Fetch with `common/http_client.fetch_text`. Parse with stdlib `html.parser`
-(no new dependency). Match anchor tags whose text (lowercased, whitespace-
-collapsed) matches:
+The page hosts WordPress "OutoftheBox" plugin widgets backed by Dropbox.
+Files are fetched via `wp-admin/admin-ajax.php?action=outofthebox-download`
+URLs constructed from `(module_token, dropbox_path)` pairs. Module tokens
+are extracted from the page HTML (`data-token` / `data-listtoken`); the
+folder-listing AJAX (used to find the latest monthly report) also requires
+a per-session `_ajax_nonce` extracted from the page JS.
 
-| Pattern | Purpose | Download to |
-|---|---|---|
-| `five.?year financial plan` or `5.?year financial plan` | Latest 5-Year plan | `data/raw/hart/five_year_plan.pdf` |
-| `recovery plan` | Sept 2022 baseline program estimate | `data/raw/hart/recovery_plan.pdf` |
-| `annual report.*fy\s*\d+` | Latest HART annual report | `data/raw/hart/annual_report.pdf` |
+| Slug | Source module | Dropbox path | Download to |
+|---|---|---|---|
+| `monthly_progress_report` | year-folder browser | `/YYYY/YYYYMM - Month YYYY Monthly Progress Report - low res.pdf` (latest) | `data/raw/hart/monthly_progress_report.pdf` |
+| `ffga_amended` | FTA Documents | `/FTA Documents/20240201 - Amended Full Funding Grant Agreement (FFGA).pdf` | `data/raw/hart/ffga_amended.pdf` |
+| `recovery_plan` (optional) | FTA Documents | `/FTA Documents/20220603 - HART 2022 Recovery Plan.pdf` | `data/raw/hart/recovery_plan.pdf` |
 
-If the index page redirects, follow with `urllib.request` automatically (urllib
-follows HTTP 301/302 by default).
+The monthly report is selected dynamically: the script lists the current
+calendar-year folder and picks the file with the greatest YYYYMM prefix
+matching `^\d{6} - .* Monthly Progress Report .* low res\.pdf$`. Falls
+back to the previous year folder for the January edge case.
 
 ### 2.2 Failure policy
 
-Hard-fail (exit 1) if fewer than 2 of the 3 expected document types are found.
-Print which types are missing. Do not proceed with a partial cache to avoid
-silent stale-data issues.
+Hard-fail (exit 1) if fewer than 2 of the 3 expected documents are found.
+The monthly report + FFGA Amended are required for downstream extraction;
+the recovery plan is optional (funding-mix only).
 
 ### 2.3 Idempotency + forced refresh
 
 Skip download if the target PDF and its manifest sidecar both exist and
-`--force` is NOT passed. No version-keyed refresh (unlike the BWS amendment
-policy) because HART document URLs appear to be consistent slugs on
-honolulutransit.org rather than rotating CMS hashes. If a new annual
-report replaces a prior one at the same URL, `--force` is the manual refresh
-trigger.
+`--force` is NOT passed. The monthly report filename is slug-stable
+(`monthly_progress_report.pdf`); to pick up a new month, run `--force`.
+The manifest sidecar records the source YYYYMM and the resolved Dropbox
+path for provenance.
 
 ---
 
@@ -98,21 +102,35 @@ install section alongside Python + pip deps.
 
 ### 3.2 Target lines + regexes
 
-**3.2.1 From the Recovery Plan (or 5-Year plan headline)**:
+**3.2.1 From the latest Monthly Progress Report (primary cost source)**:
 
-Target: total program capital cost.
+Target: total project capital cost — Current Forecast.
+
+The Summary page of every Monthly Progress Report carries a "Core
+Accountability Items" table with three columns:
+`2022 Recovery Plan | Current Forecast | Incurred to Date`. The row we
+target is `Total Project Capital Cost`, which is capital-only (excludes
+pre-RSD finance charges) — directly comparable to the road / sewer / water
+CIP figures in the rest of this project.
 
 ```
-regex: r"(?i)(total\s+program\s+cost|revised\s+project\s+budget)\s*\$?([\d,]+)"
+regex: r"Total\s+Project\s+Capital\s+Cost\s+\$?\s*([\d,]+)\s+\$?\s*([\d,]+)\s+\$?\s*([\d,]+)"
+       (capture group 2 = Current Forecast, in millions)
 ```
 
-Expected: $9–12B range. Capture the dollar amount, strip commas, multiply
-by 1,000 if the table heading says "in thousands" (check first 3 pages for
-"in thousands" / "thousands of dollars").
+Example (March 2026 report):
+`Total Project Capital Cost  $9,148  $9,569  $6,407`
+→ Current Forecast = $9,569 M = $9.569 B.
 
-Fallback: scan for the largest dollar figure on the "Program Budget Summary"
-or "Project Budget" page. If multiple candidates, prefer the one on a row
-whose label contains "total" or "revised".
+Header asserts `Core Accountability Items ($ are in millions)` within ~4 kB
+above the match; if absent, fall back to inferring scale by which multiplier
+lands the value in the sanity range. The cover-page title (e.g.
+`March 2026`) is parsed to a `report_period` YYYYMM for provenance.
+
+Fallback within the same table: if the `Total Project Capital Cost` row is
+not found, try the `Capital Cost estimate` row (top of table) — this is
+`Total Project Cost` *including* pre-RSD finance charges. Use only as
+last resort.
 
 **3.2.2 From the 5-Year Financial Plan (FY26 column)**:
 
@@ -363,6 +381,12 @@ python etl/08_emit_frontend_data.py --force
 ## 11. Provenance
 
 - Plan written by: Claude Sonnet 4.6 (main session), 2026-05-10.
+- Revised 2026-05-11 (Claude Opus 4.7): primary cost source switched from
+  the 2022 Recovery Plan EAC ($9.148B) to the latest Monthly Progress
+  Report's Core Accountability Items "Current Forecast" column. As of the
+  March 2026 report, this is $9.569B Total Project Capital Cost (capital
+  only, excludes pre-RSD finance charges). The Recovery Plan is retained
+  as an optional source for funding-mix extraction.
 - Inputs: `CIP-PLAN.md`, `METHODOLOGY.md` §1, `etl/08_emit_frontend_data.py`,
   `common/http_client.py`, `common/manifest.py`,
   `tasks/Revenue-Modeling-TOD.md` Task 3 spec.
