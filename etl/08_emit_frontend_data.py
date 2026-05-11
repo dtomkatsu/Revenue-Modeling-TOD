@@ -66,6 +66,7 @@ GUIDEWAY_PATH  = _ROOT / "data" / "raw"       / "rail_transit_guideway_alignment
 OUTPUT_PARCELS  = _ROOT / "data" / "parcels_tod.geojson"
 OUTPUT_STATIONS = _ROOT / "data" / "stations.geojson"
 OUTPUT_RAIL     = _ROOT / "data" / "rail_line.geojson"
+RAIL_CIP_PATH   = _ROOT / "data" / "processed" / "rail_cip.json"
 
 WGS84 = 4326
 # Hawaii Zone 3, US-survey-feet — same projected CRS as step 07 frontage work.
@@ -305,6 +306,18 @@ def emit_frontend(*, force: bool) -> int:
     merged["station_id"] = merged["STATION_ID"].astype(int)
     merged["net_per_ac"] = merged["rev_per_ac"] - merged["cost_per_ac"]
 
+    # Optional: add rail_cip_per_ac if step 12 has been run.
+    # Constant value across all parcels; toggled on/off in the frontend.
+    # Does NOT alter cost_per_ac or net_per_ac.
+    _rail_cip_per_ac: float | None = None
+    if RAIL_CIP_PATH.exists():
+        import json as _json
+        _rail_cip_data = _json.loads(RAIL_CIP_PATH.read_text())
+        _rail_cip_per_ac = float(_rail_cip_data["rail_cip_per_ac"])
+        merged["rail_cip_per_ac"] = _rail_cip_per_ac
+        print(f"[rail]  rail_cip_per_ac = ${_rail_cip_per_ac:,.2f}/ac/yr "
+              f"(from {RAIL_CIP_PATH.relative_to(_ROOT)})")
+
     # Dedupe by TMK. The spatial join in step 05 emits one row per (parcel,
     # walkshed) pair — large parcels touching multiple stations end up
     # duplicated. The frontend uses promoteId='tmk' for feature-state, so
@@ -323,6 +336,8 @@ def emit_frontend(*, force: bool) -> int:
         # in_tod_area flags parcels inside an adopted TOD Special District.
         "walk_dist_ft", "nearest_station_id", "in_tod_area",
     ]
+    if _rail_cip_per_ac is not None:
+        parcel_props.append("rail_cip_per_ac")
     station_lists = (
         merged.groupby("tmk")["station_id"]
               .apply(lambda s: sorted(set(int(x) for x in s)))
@@ -334,7 +349,13 @@ def emit_frontend(*, force: bool) -> int:
     print(f"[dedup] {n_before} rows → {len(deduped)} unique tmks "
           f"(-{n_before - len(deduped)} duplicates collapsed)")
 
-    keep = parcel_props + ["station_ids", "geometry"]
+    # Keep only columns that exist in the dataframe (some optional enrichment
+    # columns like walk_dist_ft may only be present when step 05b has run).
+    available = set(deduped.columns)
+    keep = [c for c in parcel_props if c in available] + ["station_ids", "geometry"]
+    missing_cols = [c for c in parcel_props if c not in available]
+    if missing_cols:
+        print(f"[warn]  Columns not in merged df (skipped): {missing_cols}")
     out_parcels = deduped[keep].copy()
 
     changed = _emit_geojson_idempotent(out_parcels, OUTPUT_PARCELS)
