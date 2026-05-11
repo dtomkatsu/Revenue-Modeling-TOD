@@ -77,6 +77,7 @@ const STATE = {
   typeSelections: new Set(DEFAULT_TYPE_SELECTIONS),
   addressIndex: null,   // Map<normalizedAddress, Feature[]>
   sidebarCollapsed: false,
+  railCipOn: false,   // sidebar toggle — adds rail_cip_per_ac to cost/net
 };
 
 // Height is ALWAYS revenue per acre (Urban3 convention: bar height = parcel
@@ -624,7 +625,12 @@ function buildParcelLayer() {
     lineWidthUnits: 'pixels',
     getFillColor: (f) => {
       if (f.properties.tmk === hoveredTmk) return [14, 165, 233, 230];
-      const v = +f.properties[colorKey];
+      let v = +f.properties[colorKey];
+      if (STATE.railCipOn) {
+        const railRate = +f.properties.rail_cip_per_ac || 0;
+        if (STATE.mode === 'cost') v = v + railRate;
+        else if (STATE.mode === 'net') v = v - railRate;
+      }
       const [r, g, b] = interpolateColor(v, lo, hi, palette);
       return [r, g, b, 217];
     },
@@ -646,7 +652,7 @@ function buildParcelLayer() {
     onHover: handleHover,
     onClick: handleClick,
     updateTriggers: {
-      getFillColor: [STATE.mode, lo, hi, hoveredTmk],
+      getFillColor: [STATE.mode, lo, hi, hoveredTmk, STATE.railCipOn],
       getElevation: [STATE.heightDomain[0], STATE.heightDomain[1], STATE.extrude],
       getLineColor: [hoveredTmk, selectedTmk],
       getLineWidth: [hoveredTmk, selectedTmk],
@@ -707,6 +713,14 @@ function wireUI() {
     }
     refresh();
   });
+
+  const chkRailCip = document.getElementById('chk-rail-cip');
+  if (chkRailCip) {
+    chkRailCip.addEventListener('change', () => {
+      STATE.railCipOn = chkRailCip.checked;
+      applyFilters();
+    });
+  }
 
   wireRangeFilter('assessed', 'assessedRange');
   wireRangeFilter('tax',      'taxRange');
@@ -1327,8 +1341,36 @@ function refresh() {
     return true;
   });
 
-  STATE.domain       = computeDomain(STATE.filtered, colorKey,    STATE.mode === 'net');
-  STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY,  false);
+  STATE.domain       = computeDomain(STATE.filtered, colorKey, STATE.mode === 'net');
+  STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY, false);
+
+  // When rail toggle is on, shift the domain by rail_cip_per_ac so the
+  // legend and color ramp reflect adjusted cost/net values.
+  if (STATE.railCipOn && STATE.filtered.length) {
+    const railRate = +STATE.filtered[0].properties.rail_cip_per_ac || 0;
+    if (railRate > 0) {
+      const [dLo, dHi] = STATE.domain;
+      if (STATE.mode === 'cost') {
+        // effectiveCost = cost_per_ac + railRate → domain shifts uniformly
+        STATE.domain = [dLo + railRate, dHi + railRate];
+      } else if (STATE.mode === 'net') {
+        // effectiveNet = net_per_ac - railRate → recompute symmetric domain
+        // from the shifted 2nd/98th percentile of the actual shifted values
+        const shiftedVals = [];
+        for (const f of STATE.filtered) {
+          const v = +f.properties[colorKey] - railRate;
+          if (Number.isFinite(v)) shiftedVals.push(v);
+        }
+        shiftedVals.sort((a, b) => a - b);
+        if (shiftedVals.length) {
+          const qi = (p) => shiftedVals[Math.max(0, Math.min(shiftedVals.length - 1, Math.floor(p * (shiftedVals.length - 1))))];
+          const m = Math.max(Math.abs(qi(0.02)), Math.abs(qi(0.98))) || 1;
+          STATE.domain = [-m, m];
+        }
+      }
+      // revenue mode: unaffected by rail CIP
+    }
+  }
 
   refreshLayer();
   renderLegend();
@@ -1402,7 +1444,8 @@ function renderSummary() {
     const rev    = Number.isFinite(+p.rev_per_ac)     ? +p.rev_per_ac     * acres : 0;
     const costOM = Number.isFinite(+p.cost_om_per_ac) ? +p.cost_om_per_ac * acres : 0;
     const cip    = Number.isFinite(+p.cip_per_ac)     ? +p.cip_per_ac     * acres : 0;
-    const cost   = Number.isFinite(+p.cost_per_ac)    ? +p.cost_per_ac    * acres : 0;
+    const railAdj = STATE.railCipOn ? (+p.rail_cip_per_ac || 0) : 0;
+    const cost   = Number.isFinite(+p.cost_per_ac)    ? (+p.cost_per_ac + railAdj) * acres : 0;
     totalRev    += rev;
     totalCostOM += costOM;
     totalCIP    += cip;
