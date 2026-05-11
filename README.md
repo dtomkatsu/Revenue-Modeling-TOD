@@ -79,6 +79,12 @@ pipeline_run.py # orchestrator (runs steps 01–08; step 09 is manual)
 | 07 | `etl/07_compute_frontage_costs.py` | Infrastructure cost per acre | Yes |
 | 08 | `etl/08_emit_frontend_data.py` | Emit `data/parcels_tod.geojson` + `stations.geojson` | Yes |
 | 09 | `etl/09_build_basemap_tiles.py` | Build self-hosted Hawaii PMTiles basemap | **Manual / yearly** |
+| 02b | `etl/02b_fetch_bws_budget.py` | Fetch BWS budget PDFs (Tier 2 auto-extraction) | Yes |
+| 03c | `etl/03c_extract_bws_totals.py` | Extract BWS water O&M / CIP totals | Yes |
+| 10 | `etl/10_fetch_hart_docs.py` | Fetch HART financial docs | Yes |
+| 11 | `etl/11_extract_hart_totals.py` | Extract HART capital totals from monthly report | Yes |
+| 12 | `etl/12_compute_rail_cip.py` | Corridor-uniform `rail_cip_per_ac` | Yes |
+| — | `etl/_assert_sanity.py` | Sanity-assert harness — run after the pipeline | Yes (CI gate) |
 
 Step 09 requires Java 21+ and takes 5–15 minutes. Run it manually:
 
@@ -88,6 +94,25 @@ python etl/09_build_basemap_tiles.py
 
 The output (`data/honolulu_basemap.pmtiles`, ~22 MB) is committed to git.
 See [METHODOLOGY.md §11](METHODOLOGY.md#11-basemap) for details.
+
+### Sanity-assert harness
+
+Run `python etl/_assert_sanity.py` after the pipeline to validate every
+data file is within its documented sanity bounds. The script exits 0 on
+all PASS/SKIP and 1 on any FAIL — the planned
+`.github/workflows/refresh-data.yml` will run it as the final step and
+fail the workflow on any tripped assertion, blocking a stale-or-broken
+data PR from landing.
+
+Coverage at a glance: city budget O&M + CIP magnitudes, BWS water O&M +
+CIP magnitudes (reads final pipeline outputs so any source — manual
+override, auto-extract, or PDF — that produces a bad value is caught),
+per-foot rate sanity, parcel count + landlocked share, geometry +
+NaN/Inf guards, cost outlier ratio, revenue coverage among non-landlocked
+parcels, required-field presence, assessed-value coverage, and a
+tautological budget reconciliation. The two manifest-dependent
+assertions (per-foot rates + reconciliation) gracefully SKIP if step 07
+hasn't been run locally — that file is gitignored.
 
 ## Development
 
