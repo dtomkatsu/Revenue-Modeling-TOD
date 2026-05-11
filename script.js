@@ -1412,10 +1412,16 @@ function renderLegend() {
   const heightLine = STATE.extrude
     ? `<div class="muted" style="font-size:10px;margin-top:6px;">Bar height: revenue / ac</div>`
     : '';
+  const railRate = STATE.filtered.length ? (+STATE.filtered[0].properties.rail_cip_per_ac || 0) : 0;
+  const railOnAndRelevant = STATE.railCipOn && railRate > 0 && STATE.mode !== 'revenue';
+  const railLine = railOnAndRelevant
+    ? `<div class="muted" style="font-size:10px;margin-top:6px;">+ rail CIP ${fmtUSDk(railRate)}/ac uniform across corridor</div>`
+    : '';
   legend.innerHTML = `
     <div class="legend-title muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">Color: ${METRIC_LABELS[STATE.mode]}</div>
     <div class="legend-bar" style="background:${gradient};"></div>
     <div class="legend-labels"><span>${fmtUSDk(lo)}</span>${STATE.mode === 'net' ? '<span>0</span>' : ''}<span>${fmtUSDk(hi)}</span></div>
+    ${railLine}
     ${heightLine}
   `;
 }
