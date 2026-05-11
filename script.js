@@ -718,7 +718,7 @@ function wireUI() {
   if (chkRailCip) {
     chkRailCip.addEventListener('change', () => {
       STATE.railCipOn = chkRailCip.checked;
-      applyFilters();
+      refresh();
     });
   }
 
