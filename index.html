@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Skyline Revenue vs. Cost — Honolulu</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
 <aside id="sidebar">
@@ -37,10 +37,6 @@
   </section>
 
   <section class="control">
-    <label class="check" hidden>
-      <input type="checkbox" id="extrude-toggle" checked>
-      <span>3D extrusion</span>
-    </label>
     <label class="check toggle-rail">
       <input type="checkbox" id="chk-rail-cip">
       <span>Include rail CIP in cost
@@ -91,11 +87,14 @@
       </div>
     </div>
     <div class="filter type-filter">
-      <button class="type-filter-toggle" aria-expanded="false" aria-controls="type-filter-more">
+      <div class="type-filter-head">
         <span class="filter-name">Property type</span>
+      </div>
+      <label class="type-check"><input type="checkbox" data-bucket="Residential" checked><span>Residential</span></label>
+      <button class="type-filter-toggle" aria-expanded="false" aria-controls="type-filter-more">
+        <span class="type-filter-toggle__label">More</span>
         <span class="type-filter-toggle__caret" aria-hidden="true">▾</span>
       </button>
-      <label class="type-check"><input type="checkbox" data-bucket="Residential" checked><span>Residential</span></label>
       <div id="type-filter-more" class="type-filter-more" hidden>
         <label class="type-check"><input type="checkbox" data-bucket="Multi-family" checked><span>Multi-family (apartments)</span></label>
         <label class="type-check"><input type="checkbox" data-bucket="Commercial" checked><span>Commercial &amp; hotel</span></label>
@@ -142,6 +141,6 @@
         crossorigin="anonymous"></script>
 <script src="https://unpkg.com/deck.gl@9.0.32/dist.min.js"></script>
 <script src="https://unpkg.com/@deck.gl/mapbox@9.0.32/dist.min.js"></script>
-<script src="script.js?v=3"></script>
+<script src="script.js?v=4"></script>
 </body>
 </html>

@@ -4,8 +4,8 @@
     {
       "name": "tod",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "http-server", "-p", "8766", "--cors", "-c-1"],
-      "port": 8766
+      "runtimeArgs": ["--yes", "http-server", "-p", "8765", "--cors", "-c-1"],
+      "port": 8765
     }
   ]
 }

@@ -699,20 +699,23 @@ function wireUI() {
     });
   });
 
-  document.getElementById('extrude-toggle').addEventListener('change', (e) => {
-    STATE.extrude = e.target.checked;
-    map.setLayoutProperty('rail-line-xray', 'visibility', STATE.extrude ? 'visible' : 'none');
-    if (STATE.extrude) {
-      // 3D needs both pitch and zoom to be visible — pitch up to near max,
-      // zoom in enough that 30–1500m bars register as buildings.
-      const targetPitch = Math.max(map.getPitch(), 60);
-      const targetZoom  = Math.max(map.getZoom(), 15);
-      map.easeTo({ pitch: targetPitch, zoom: targetZoom, duration: 800 });
-    } else {
-      map.easeTo({ pitch: 0, duration: 600 });
-    }
-    refresh();
-  });
+  // 3D extrusion is permanently on (toggle removed from sidebar); STATE.extrude
+  // is initialized true and the rail-line xray layer is always visible.
+  const extrudeToggle = document.getElementById('extrude-toggle');
+  if (extrudeToggle) {
+    extrudeToggle.addEventListener('change', (e) => {
+      STATE.extrude = e.target.checked;
+      map.setLayoutProperty('rail-line-xray', 'visibility', STATE.extrude ? 'visible' : 'none');
+      if (STATE.extrude) {
+        const targetPitch = Math.max(map.getPitch(), 60);
+        const targetZoom  = Math.max(map.getZoom(), 15);
+        map.easeTo({ pitch: targetPitch, zoom: targetZoom, duration: 800 });
+      } else {
+        map.easeTo({ pitch: 0, duration: 600 });
+      }
+      refresh();
+    });
+  }
 
   const chkRailCip = document.getElementById('chk-rail-cip');
   if (chkRailCip) {
