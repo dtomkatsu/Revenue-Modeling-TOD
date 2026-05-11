@@ -36,8 +36,16 @@ Output: ``data/processed/cip_totals.json`` with shape::
                                 "total_6yr_thousands": ..., "fy26_thousands": ... } }
     }
 
-Manual overrides take precedence (mirrors step 03's pattern). Drop a
-``data/cip_overrides.json``::
+Source precedence (highest wins):
+
+  1. ``data/cip_overrides.json``                  — manual escape hatch
+  2. ``data/processed/bws_totals.json``           — auto-extracted by
+                                                    ``etl/03c`` (BWS keys only)
+  3. PDF extraction from the City capital book  — this script
+
+BWS is semi-autonomous and absent from the City capital PDF; for BWS keys
+the practical precedence is (1) then (2). Manual override format
+(``data/cip_overrides.json``)::
 
     {
       "water_cip_total_usd": 75000000,
@@ -75,7 +83,11 @@ SCRIPT_NAME = "etl/03b_extract_cip_totals.py"
 
 CAPITAL_PDF    = _ROOT / "data" / "raw"       / "budget" / "capital_fy26.pdf"
 OVERRIDES_PATH = _ROOT / "data" / "cip_overrides.json"
+BWS_TOTALS     = _ROOT / "data" / "processed" / "bws_totals.json"
 OUTPUT_PATH    = _ROOT / "data" / "processed" / "cip_totals.json"
+
+# BWS keys whose default is sourced from bws_totals.json (Tier 2).
+_BWS_KEYS = {"water_cip_total_usd", "water_cip_fy26_usd"}
 
 # Program-Summary pages that aggregate to road / sewer CIP. Labels are
 # matched case-insensitively against the "Program Summary: <label>" line
@@ -133,6 +145,16 @@ def _load_overrides() -> dict[str, object]:
         return json.loads(OVERRIDES_PATH.read_text())
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Cannot parse {OVERRIDES_PATH}: {e}") from e
+
+
+def _load_bws_totals() -> dict[str, object]:
+    """Read data/processed/bws_totals.json if present (Tier 2 auto-extract)."""
+    if not BWS_TOTALS.exists():
+        return {}
+    try:
+        return json.loads(BWS_TOTALS.read_text())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Cannot parse {BWS_TOTALS}: {e}") from e
 
 
 def extract(*, force: bool) -> int:
@@ -214,6 +236,23 @@ def extract(*, force: bool) -> int:
         "note": "Board of Water Supply is semi-autonomous; not in capital_fy26.pdf. "
                 "Supply via data/cip_overrides.json.",
     }
+
+    # Tier 2 auto-extracted BWS defaults (bws_totals.json). City capital
+    # PDF doesn't contain BWS data, so this is the only programmatic source
+    # for water CIP. Manual overrides still win over this default.
+    bws = _load_bws_totals()
+    for key in ("water_cip_total_usd", "water_cip_fy26_usd"):
+        if bws.get(key) is not None and values[key] is None:
+            values[key] = int(bws[key])
+            provenance["water_cip"] = {
+                **provenance.get("water_cip", {}),
+                "source":           "bws_totals.json (auto)",
+                "file":             str(BWS_TOTALS.relative_to(_ROOT)),
+                "amendment_number": bws.get("amendment_number"),
+                "amendment_date":   bws.get("amendment_date"),
+            }
+            print(f"[bws-auto] {key} = ${values[key]:,}  "
+                  f"(amendment #{bws.get('amendment_number')})")
 
     overrides = _load_overrides()
     for key in ("road_cip_total_usd", "sewer_cip_total_usd", "water_cip_total_usd",

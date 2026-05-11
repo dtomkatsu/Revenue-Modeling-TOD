@@ -15,9 +15,21 @@ frontage-rate model in METHODOLOGY.md §4:
 Output: ``data/processed/budget_totals.json`` (+ manifest sidecar) with
 ``provenance`` recording which source each number came from.
 
-Manual overrides take precedence. To override an extracted value (or supply
-one pdfplumber can't parse cleanly), drop a ``data/budget_overrides.json``
-with any of the three keys::
+Source precedence (highest wins):
+
+  1. ``data/budget_overrides.json``                 — manual escape hatch
+  2. ``data/processed/bws_totals.json``             — auto-extracted by
+                                                      ``etl/03c`` (Tier 2,
+                                                      BWS keys only)
+  3. PDF extraction from the City budget book      — this script
+
+BWS values are not present in the City budget PDFs (BWS is semi-autonomous),
+so for ``water_om_total_usd`` the practical precedence is (1) then (2). The
+manual override file remains in place as an escape hatch for parser
+breakage.
+
+Manual override format — drop a ``data/budget_overrides.json`` with any
+of the three keys::
 
     {
       "water_om_total_usd": 195000000,
@@ -60,7 +72,12 @@ OPERATING_PDF  = BUDGET_DIR / "operating_fy26.pdf"
 CAPITAL_PDF    = BUDGET_DIR / "capital_fy26.pdf"
 TABLES_AUDIT   = BUDGET_DIR / "extracted_tables.json"
 OVERRIDES_PATH = _ROOT / "data" / "budget_overrides.json"
+BWS_TOTALS     = _ROOT / "data" / "processed" / "bws_totals.json"
 OUTPUT_PATH    = _ROOT / "data" / "processed" / "budget_totals.json"
+
+# BWS keys whose default is sourced from bws_totals.json (Tier 2). Other keys
+# in this script come from the City budget PDF and are unaffected.
+_BWS_KEYS = {"water_om_total_usd"}
 
 # A row in a Honolulu departmental budget table is a label followed by 5
 # numeric columns: FY24 Actual / FY25 Appropriated / FY26 Current Svcs /
@@ -164,6 +181,16 @@ def _load_overrides() -> dict[str, object]:
         raise RuntimeError(f"Cannot parse {OVERRIDES_PATH}: {e}") from e
 
 
+def _load_bws_totals() -> dict[str, object]:
+    """Read data/processed/bws_totals.json if present (Tier 2 auto-extract)."""
+    if not BWS_TOTALS.exists():
+        return {}
+    try:
+        return json.loads(BWS_TOTALS.read_text())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Cannot parse {BWS_TOTALS}: {e}") from e
+
+
 def extract(*, force: bool, audit: bool = True) -> int:
     if not OPERATING_PDF.exists():
         raise FileNotFoundError(
@@ -206,7 +233,27 @@ def extract(*, force: bool, audit: bool = True) -> int:
             print(f"[audit] dumping all tables in {CAPITAL_PDF.name}")
             audit_records.extend(_audit_tables(CAPITAL_PDF, pdf))
 
-    # Apply overrides — manual entry wins.
+    # Apply Tier 2 auto-extracted BWS defaults (bws_totals.json). City PDF
+    # extraction can't capture BWS data since BWS is semi-autonomous, so this
+    # is the only programmatic source for water_om. Manual overrides still
+    # win over this default — see precedence list in the module docstring.
+    bws = _load_bws_totals()
+    for key in KEYS:
+        if key not in _BWS_KEYS:
+            continue
+        if bws.get(key) is not None and values[key] is None:
+            values[key] = int(bws[key])
+            provenance[key] = {
+                "source":           "bws_totals.json (auto)",
+                "file":             str(BWS_TOTALS.relative_to(_ROOT)),
+                "amendment_number": bws.get("amendment_number"),
+                "amendment_date":   bws.get("amendment_date"),
+                "description":      provenance[key].get("description", ""),
+            }
+            print(f"[bws-auto] {key} = ${values[key]:,}  "
+                  f"(amendment #{bws.get('amendment_number')})")
+
+    # Apply manual overrides — these always win.
     overrides = _load_overrides()
     for key in KEYS:
         if key in overrides and overrides[key] is not None:
