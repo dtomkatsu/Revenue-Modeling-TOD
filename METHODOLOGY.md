@@ -59,34 +59,40 @@ Files cached to `data/raw/budget/`:
 |---|---|---|
 | `operating_fy26.pdf` | 175 (Road Maintenance), Wastewater O&M section | `road_om_total_usd` ($48,070,770), `sewer_om_total_usd` ($188,675,341) |
 | `capital_fy26.pdf` | 181, 185, 215, 219 (road CIP); 252, 370 (sewer CIP) | `road_cip_total_usd` ($123,324,333/yr, 6yr-avg), `sewer_cip_total_usd` ($787,481,666/yr, 6yr-avg) |
-| BWS budget book + Amendment #4 (manual override) | n/a | `water_om_total_usd` ($362,439,988), `water_cip_total_usd` ($190,364,333/yr, 6yr-avg), `water_cip_fy26_usd` ($283,327,500) |
+| BWS combined budget + Six-Year CIP + Amendment #N (auto-extracted) | n/a | `water_om_total_usd` ($362,439,988), `water_cip_total_usd` ($190,364,333/yr, 6yr-avg), `water_cip_fy26_usd` ($283,327,500) |
 
 Extraction is via pdfplumber's `extract_tables()` with hard-coded page hints
 and label regexes (see `etl/03_extract_budget_totals.py` for O&M and
-`etl/03b_extract_cip_totals.py` for CIP). Manual override files:
-`data/budget_overrides.json` (O&M) and `data/cip_overrides.json` (CIP) —
-any non-null value there wins over the PDF extraction.
+`etl/03b_extract_cip_totals.py` for CIP). Source precedence (highest wins):
 
-**Water O&M and Water CIP** are loaded via the override files because the
-Board of Water Supply is semi-autonomous and is not in the City budget
-PDFs. Sources (retrieved 2026-05-08):
+1. Manual `data/budget_overrides.json` / `data/cip_overrides.json` — escape
+   hatch for parser breakage; preserved but BWS keys are cleared by default.
+2. Auto-extracted `data/processed/bws_totals.json` (BWS keys only, from
+   `etl/03c`) — provides the FY26 BWS figures that aren't in the City PDFs.
+3. PDF extraction from the City budget book — this is what 03/03b read first.
 
-- Water O&M: BWS FY26 Combined Operating + CIP Budget, post-Amendment #4
-  (2026-01-14). `water_om_total_usd = $362,439,988` is the FY26 Total
-  Operating Expenditures line, correctly disjoint from the $79.1M
-  operating-funded slice of CIP (which is captured in CIP).
-- Water CIP: BWS Six-Year CIP FY21–26, total $1,142,186,000 ÷ 6 =
-  $190,364,333/yr annualized (matches road/sewer CIP methodology). The
-  current FY26 single-year all-funds CIP is $283,327,500 (Operating
-  Fund $79.1M + SRF $67.9M + Special Expendable $10.9M + Improvement
-  $43.4M + Extramural $19M + WIFIA $63M, post-Amendment #4) and is
-  preserved in `cip_overrides.json` as `water_cip_fy26_usd` for
-  provenance.
+**Water O&M and Water CIP** are auto-extracted by `etl/02b_fetch_bws_budget.py`
+(URL-discovery + download) and `etl/03c_extract_bws_totals.py` (PDF parse).
+The Board of Water Supply is semi-autonomous and is not in the City budget
+PDFs, so its figures come from the public BWS financial-statements page at
+`https://www.boardofwatersupply.com/department-financial-statements/`:
 
-If the BWS budget is amended again, update the override files and re-run
-the pipeline. A Tier-2 follow-up would automate `etl/02b` (download) +
-`etl/03c` (parse) using `pdftotext -layout`; for now the manual override
-is the source of truth.
+- `water_om_total_usd = $362,439,988` — FY26 "Total Expenditures" row on
+  the BWS combined Operating + CIP Budget book. Amendments only reprogram
+  CIP and leave operating totals unchanged.
+- `water_cip_fy26_usd = $283,327,500` — "FY2026 CIP Budget (as Amended)"
+  line on the highest-numbered amendment PDF (currently Amendment #4,
+  dated 2026-01-14). All-funds total: Operating Fund $79.1M + SRF $67.9M
+  + Special Expendable $10.9M + Improvement $43.4M + Extramural $19M
+  + WIFIA $63M.
+- `water_cip_total_usd = $190,364,333/yr` — "TOTAL CAPITAL IMPROVEMENT"
+  row on the BWS Six-Year CIP FY21–26 rollup ($1,142,186,000 total in
+  thousands, annualized ÷ 6 to match the road/sewer CIP methodology).
+
+When BWS publishes a new amendment, `etl/02b` auto-detects the higher
+amendment number on the index page and force-refreshes that single file
+without `--force`. The override files remain as a manual escape hatch
+should the auto-extractor ever fail.
 
 **CIP annualization** — projects in `capital_fy26.pdf` are programmed
 across FY26–FY31 with substantial year-to-year lumpiness (e.g. Sand Island
@@ -461,11 +467,14 @@ Listed in rough order of impact on the displayed numbers:
 3. **Sewer/water frontage = road frontage** (§6.4) — may over- or
    underestimate depending on whether mains follow streets in that
    specific block.
-4. ~~Water O&M and Water CIP = null~~ — **closed in v1.2.** Loaded
-   manually from the BWS FY26 Combined Op+CIP Budget (Amendment #4) and
-   the BWS Six-Year CIP FY21–26. `water_om = $362.4M`, `water_cip =
-   $190.4M/yr` (6yr-avg). Source URLs in `data/{budget,cip}_overrides.json`
-   `_notes`. Update on next BWS amendment or fiscal year rollover.
+4. ~~Water O&M and Water CIP = null~~ — **closed in v1.3.** Auto-extracted
+   by `etl/02b_fetch_bws_budget.py` (index-page scrape of BWS
+   financial-statements page) + `etl/03c_extract_bws_totals.py` (pdftotext
+   parse). `water_om = $362.4M`, `water_cip = $190.4M/yr` (6yr-avg),
+   `water_cip_fy26 = $283.3M` (Amendment #4). The override files
+   (`data/{budget,cip}_overrides.json`) remain as an escape hatch but
+   BWS keys are cleared by default — the pipeline auto-detects new
+   amendments on each run.
 5. ~~Operating costs only, no capital replacement~~ — **closed in v1.1.**
    CIP is annualized as 6-year-average and added on top of O&M; see §6.1.
    Caveat: CIP is *attributed* via the same frontage proration as O&M,
