@@ -3,7 +3,7 @@
   "source_url": "data/processed/parcels_revenue.geojson + data/processed/parcels_costs.geojson",
   "row_count": 19872,
   "script": "etl/08_emit_frontend_data.py",
-  "fetched_at": "2026-05-11T19:46:56.978519+00:00",
+  "fetched_at": "2026-05-13T19:17:56+00:00",
   "value_field": "assessed_value",
   "class_field": "land_use",
   "rows_unmatched_cost": 0,
@@ -24,7 +24,5 @@
     13
   ],
   "deduped_by_tmk": true,
-  "rows_collapsed": 5962,
-  "sha256": "6af67482b055464b09fdd9cc7ac38743cba252a477b67f2d820654642b8ac9e1",
-  "size_bytes": 21088519
+  "rows_collapsed": 5962
 }
