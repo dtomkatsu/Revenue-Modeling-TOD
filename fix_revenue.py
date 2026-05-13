@@ -35,35 +35,35 @@ RPAD_FALLBACK  = ROOT / "data/raw/rpad/asmtpitt.csv"
 OUT_PATH       = ROOT / "data/processed/parcels_revenue.geojson"
 
 # FY2026 Honolulu RPT rates $/1,000 net taxable value.
-# Source: City & County Honolulu FY2026 RPT ordinance.
+# Source: Honolulu Resolution 2575 / Ordinance 25-44 (FY July 1, 2025 –
+# June 30, 2026). Honolulu has nine taxed classes; Preservation and Public
+# Service are land-use designations on RPAD records but are not taxed.
 RATE = {
     "Residential":              3.50,
-    "Residential A":            4.50,   # tier-1; tier-2 above $1M handled separately
-    "Apartment":               11.40,
+    "Residential A":            4.00,   # tier-1; tier-2 above $1M handled separately
     "Commercial":              12.40,
     "Industrial":              12.40,
     "Agricultural":             5.70,
-    "Preservation":             5.70,
+    "Vacant Agricultural":      8.50,
     "Hotel and Resort":        13.90,
-    "Vacation Rental":          9.85,
     "Bed and Breakfast Home":   6.50,
-    "Residential Investor":     9.35,
-    "Public Service":           0.00,
+    "Preservation":             0.00,   # land use only, not a taxed class
+    "Public Service":           0.00,   # land use only, not a taxed class
 }
 
-# RPAD numeric taxratecode -> human-readable class. Codes inferred from the
-# FY2026 asmtpitt distribution (1=Residential dominant ~297k; 7=Hotel/Resort
-# 8.6k; 3=Commercial 8.1k; 4=Industrial 6.5k; 5=Agricultural 4.4k;
-# 6=Preservation 1.9k; 9=Apartment 466; 0=Public Service 94; 22 unmapped).
+# RPAD numeric taxratecode -> human-readable class. Authoritative mapping
+# from the City & County of Honolulu RPAD "Land Use Codes" reference
+# (https://realproperty.honolulu.gov/media/eombhyp2/zoning.pdf, retrieved
+# 2026-05-12). Class/Tax Code is the second column of that table.
 NUMERIC_CODE = {
-    "0":  "Public Service",
+    "0":  "Vacant Agricultural",
     "1":  "Residential",
     "3":  "Commercial",
     "4":  "Industrial",
     "5":  "Agricultural",
     "6":  "Preservation",
     "7":  "Hotel and Resort",
-    "9":  "Apartment",
+    "9":  "Public Service",
 }
 
 # RPAD ovrclass overrides (only well-established mappings — others fall back
@@ -74,14 +74,15 @@ OVRCLASS_OVERRIDE = {
 }
 
 # Letter-code shim (kept for forward compatibility if RPAD ever reverts to
-# the older alpha codes).
+# the older alpha codes — Honolulu's CAMA system has used both numeric and
+# letter encodings historically). Only canonical, currently-real classes
+# are mapped; obscure / unknown letters fall through to None.
 LETTER_CODE = {
     "a":  "Residential",         "aa": "Residential A",
-    "b":  "Apartment",           "c":  "Commercial",
-    "d":  "Industrial",          "e":  "Agricultural",
-    "f":  "Preservation",        "g":  "Hotel and Resort",
-    "h":  "Vacation Rental",     "i":  "Residential Investor",
-    "j":  "Bed and Breakfast Home",
+    "c":  "Commercial",          "d":  "Industrial",
+    "e":  "Agricultural",        "f":  "Preservation",
+    "g":  "Hotel and Resort",    "j":  "Bed and Breakfast Home",
+    "v":  "Vacant Agricultural",
     "x":  "Public Service",      "p":  "Public Service",
 }
 

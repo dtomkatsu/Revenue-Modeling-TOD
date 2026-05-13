@@ -236,32 +236,51 @@ Schema (both tables, identical):
 | `buildingexemption` | int | Building exemption amount. |
 | `landexemption` | int | Land exemption amount. |
 | `tnettaxval` | int | **Net taxable value** = land + building − exemptions. Authoritative for the tax base. |
-| `taxratecode` | float | **Empty across all rows in the published table.** Should encode property class (residential A tier 1, commercial, hotel/resort, etc.). |
-| `ovrclass` | float | **Empty across all rows.** Override class. |
+| `taxratecode` | str (1-digit) | Property class code per the RPAD "Land Use Codes" reference. **Empty in `asmtgis.csv` but populated in `asmtpitt.csv`** — `fix_revenue.py` falls through to `asmtpitt` when `asmtgis` is null. See §5.2 for the code-to-class table. |
+| `ovrclass` | str | Override class. `11` = Residential A (non-owner-occupied residential ≥ $1M). Empty for parcels without an override. |
 | `pittsqft` / `pittacre` | int | Likely PITT-system area; equals zero on most rows. |
 
 ### 5.2 Computing annual tax
 
-Because `taxratecode` and `ovrclass` are empty, we **cannot** apply per-class
-millage rates from the FY26 RPT ordinance. v1 falls back to a flat blended
-rate:
+Per-class millage rates from Honolulu's FY2026 RPT schedule (Resolution
+2575 / Ordinance 25-44, FY July 1, 2025 – June 30, 2026) are applied to
+each parcel's `tnettaxval`. Class is resolved by looking up `taxratecode`
+against the RPAD code table, then applying `ovrclass` overrides where
+present.
 
+**RPAD `taxratecode` → class** (from
+[RPAD Land Use Codes reference](https://realproperty.honolulu.gov/media/eombhyp2/zoning.pdf)):
+
+| Code | Class | FY26 rate ($/$1k) |
+|---|---|---|
+| 0 | Vacant Agricultural | 8.50 |
+| 1 | Residential | 3.50 |
+| 3 | Commercial | 12.40 |
+| 4 | Industrial | 12.40 |
+| 5 | Agricultural | 5.70 |
+| 6 | Preservation | 0.00 (non-taxed land use designation) |
+| 7 | Hotel and Resort | 13.90 |
+| 9 | Public Service | 0.00 (non-taxed land use designation) |
+
+**ovrclass overrides**:
+
+- `ovrclass=11` → **Residential A** — non-owner-occupied residential ≥ $1M.
+  Two-tier: $4.00/$1k on the first $1M (Tier 1), $11.40/$1k on the excess
+  (Tier 2). All Residential A parcels in the corridor have tnettaxval >
+  $1M by definition, so they all pay the blended Tier 1 + Tier 2 amount.
+
+**Bed and Breakfast Home** ($6.50/$1k) is a real Honolulu tax class but
+the RPAD code that flags it is not yet identified in our pipeline — no
+parcels in the current corridor classify as B&B. To fix, sample RPAD
+records for known B&B permits and back out the encoding.
+
+Annual tax math:
+
+```python
+tax = tnettaxval × base_rate / 1000
+if class == "Residential A" and tnettaxval > 1_000_000:
+    tax += (tnettaxval - 1_000_000) × (11.40 - 4.00) / 1000
 ```
-annual_tax = tnettaxval × FALLBACK_MILLAGE / 1000
-```
-
-where `FALLBACK_MILLAGE = 5.70 ($/$1k)` — chosen as a midpoint between
-owner-occupied Residential A Tier 1 ($4.50) and the city-wide weighted
-average. **This understates commercial parcels** (real rate ~$12.40/$1k)
-**and overstates owner-occupied residential** (real rate ~$3.50). The
-relative ranking of parcels is preserved, but absolute dollar amounts and
-the tall-bar/short-bar contrast in the urban core are muted.
-
-**To fix**: source the FY26 RPT class assignments from elsewhere — possibly
-the City Council ordinance PDF, the RPAD online lookup tool, or a request
-to RPAD for a class-keyed bulk export. Then update `fix_revenue.py` (or
-restore `etl/06_compute_revenue.py` when it's reworked) to apply
-class-specific rates.
 
 ### 5.3 Field-name auto-detection
 
@@ -459,15 +478,24 @@ stations" fits to the union of all walksheds.
 
 Listed in rough order of impact on the displayed numbers:
 
-1. **Flat $5.70/$1k millage rate** (§5.2) — biggest single source of error.
-   Understates commercial revenue, overstates Res-A. Rankings preserved,
-   absolute amounts off by up to ~2x at the extremes.
+1. ~~Flat $5.70/$1k millage rate~~ — **closed in v1.4 (2026-05-12).**
+   Per-class FY26 millage rates from Resolution 2575 / Ordinance 25-44
+   are now applied. RPAD `taxratecode` is resolved against the
+   authoritative RPAD Land Use Codes reference; `ovrclass=11` triggers
+   the Residential A two-tier calculation ($4.00 / $11.40). Preservation
+   (code 6) and Public Service (code 9) are land-use designations only
+   and assessed at $0.
 2. **Walkshed = 1-mi straight buffer** (§3) — overstates catchments,
    especially across barriers like the H-1 or the gulches.
 3. **Sewer/water frontage = road frontage** (§6.4) — may over- or
    underestimate depending on whether mains follow streets in that
    specific block.
-4. ~~Water O&M and Water CIP = null~~ — **closed in v1.3.** Auto-extracted
+4. **Bed and Breakfast Home not yet detected** (§5.2) — real Honolulu
+   class at $6.50/$1k but no RPAD-side flag is wired up. Likely small
+   impact in the corridor (no known B&B permits inside Skyline
+   walksheds), but should be confirmed before relying on the numbers
+   for a TVR-heavy neighborhood.
+5. ~~Water O&M and Water CIP = null~~ — **closed in v1.3.** Auto-extracted
    by `etl/02b_fetch_bws_budget.py` (index-page scrape of BWS
    financial-statements page) + `etl/03c_extract_bws_totals.py` (pdftotext
    parse). `water_om = $362.4M`, `water_cip = $190.4M/yr` (6yr-avg),
@@ -475,21 +503,21 @@ Listed in rough order of impact on the displayed numbers:
    (`data/{budget,cip}_overrides.json`) remain as an escape hatch but
    BWS keys are cleared by default — the pipeline auto-detects new
    amendments on each run.
-5. ~~Operating costs only, no capital replacement~~ — **closed in v1.1.**
+6. ~~Operating costs only, no capital replacement~~ — **closed in v1.1.**
    CIP is annualized as 6-year-average and added on top of O&M; see §6.1.
    Caveat: CIP is *attributed* via the same frontage proration as O&M,
    which underweights capital projects whose footprint isn't linear (e.g.
    treatment-plant upgrades). A more accurate model would split CIP
    into linear (mains, roadway rehab) and point/area (treatment, pump
    stations) and attribute each appropriately.
-6. **State roads filtered, but state-funded improvements not credited** —
+7. **State roads filtered, but state-funded improvements not credited** —
    freeway interchanges generate land value but we don't see the parcels
    credited for that.
-7. **Parcels-tax field naming** — `tmk` is normalized to 8-digit
+8. **Parcels-tax field naming** — `tmk` is normalized to 8-digit
    zero-padded string. Mismatches with the RPAD `tmk` column (also
    8-digit) result in some rows dropping silently. Currently 34 of 25,834
    rows are unmatched (0.13%).
-8. **Corner-parcel double-counting** (§6.6) — defensible but inflates
+9. **Corner-parcel double-counting** (§6.6) — defensible but inflates
    cost-per-acre at intersections by up to 2x.
 
 ---
@@ -501,7 +529,7 @@ canonical comparison. Major deltas:
 
 | Aspect | Urban3 | This v1 |
 |---|---|---|
-| Revenue side | Property tax + GET + fees + transfers | Property tax only (flat-rate) |
+| Revenue side | Property tax + GET + fees + transfers | Property tax only (per-class FY26 rates, Res-A two-tier) |
 | Cost side | Operating + capital amortization | Operating + capital (6yr-avg, frontage-prorated) |
 | Geographic scope | Whole city/county for context | TOD walksheds only |
 | Geographic baseline | Suburban parcels visible for contrast | Urban TOD only — no contrast |
