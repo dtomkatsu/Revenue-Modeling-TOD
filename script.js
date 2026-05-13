@@ -53,7 +53,7 @@ const LAND_USE_TO_BUCKET = (() => {
 const DEFAULT_TYPE_SELECTIONS = ['Residential','Multi-family','Commercial','Industrial','Other'];
 
 const STATE = {
-  mode: 'revenue',
+  mode: 'net',
   extrude: true,
   stationId: '',
   parcels: null,        // raw FeatureCollection
@@ -80,9 +80,9 @@ const STATE = {
   railCipOn: false,   // sidebar toggle — adds rail_cip_per_ac to cost/net
 };
 
-// Height is ALWAYS revenue per acre (Urban3 convention: bar height = parcel
-// productivity, color = whatever the user wants to see — net is the iconic view).
-const HEIGHT_KEY = 'rev_per_ac';
+// Height = net per acre (magnitude); color = selected metric.
+// Using absolute value so negative-net parcels still extrude; symmetric domain.
+const HEIGHT_KEY = 'net_per_ac';
 
 const fmtUSD0 = new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', maximumFractionDigits: 0,
@@ -1345,7 +1345,7 @@ function refresh() {
   });
 
   STATE.domain       = computeDomain(STATE.filtered, colorKey, STATE.mode === 'net');
-  STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY, false);
+  STATE.heightDomain = computeDomain(STATE.filtered, HEIGHT_KEY, true);
 
   // When rail toggle is on, shift the domain by rail_cip_per_ac so the
   // legend and color ramp reflect adjusted cost/net values.

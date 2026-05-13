@@ -25,11 +25,11 @@
   <section class="control">
     <label>Metric</label>
     <div class="seg" id="mode-toggle" role="radiogroup">
-      <button class="seg-btn active" data-mode="revenue" role="radio" aria-checked="true"
+      <button class="seg-btn" data-mode="revenue" role="radio" aria-checked="false"
         data-tooltip="The property tax this parcel pays the city each year, divided by its size in acres. Higher = more tax revenue per acre of land. (FY2026)">Revenue</button>
       <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false"
         data-tooltip="What it costs the city each year to maintain the roads, water, and sewer pipes serving this parcel, divided by its size in acres. (FY2026)">Cost</button>
-      <button class="seg-btn" data-mode="net" role="radio" aria-checked="false"
+      <button class="seg-btn active" data-mode="net" role="radio" aria-checked="true"
         data-tooltip="Revenue minus cost. Green = the parcel pays for itself. Red = the city loses money serving it. (FY2026)">Net</button>
     </div>
     <div class="seg-caption" id="seg-caption">all values per acre</div>
