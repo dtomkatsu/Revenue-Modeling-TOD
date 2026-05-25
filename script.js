@@ -56,8 +56,11 @@ const STATE = {
   mode: 'net',
   extrude: true,
   stationId: '',
+  showAllParcels: false,
   parcels: null,        // raw FeatureCollection
   stations: null,
+  stationsByWest: [],   // stations sorted longitude-ASC for the guided tour
+  narratives: {},       // station-name → { framing, theme }
   railLine: null,       // buffered Skyline guideway ribbon polygon
   filtered: [],         // currently visible parcel features
   domain: [0, 1],       // [min, max] of color metric (98th-pct clipped)
@@ -153,6 +156,27 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right'
 const overlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
 map.addControl(overlay);
 
+// Non-interleaved overlay for the rail guideway line — renders on a separate
+// transparent canvas composited above MapLibre's framebuffer, so it's never
+// depth-tested against the 3D parcel bars and always draws on top.
+const railOverlay = new deck.MapboxOverlay({ interleaved: false, layers: [] });
+map.addControl(railOverlay);
+
+// Map of (numeric) station id → station chip DOM element. Populated during
+// addLayers(); read by renderNarrative() to toggle the .active class on
+// whichever chip the guided tour is currently focused on.
+const chipRefs = new Map();
+
+// Static rail guideway path coordinates — flatMap-handled so MultiLineString
+// segments are valid PathLayer inputs. Set once in style.load, reused by
+// rebuildRailLayers() on every active-dot pulse frame.
+let railPaths = null;
+
+// Active-dot pulse animation state. pulsePhase advances each rAF frame and
+// is consumed via Math.sin to oscillate the active station dot's radius.
+let pulsePhase = 0;
+let pulseRaf = null;
+
 // onHover fires with object:null on most off-parcel moves, but a fast mouse
 // leave that skips empty map (e.g. straight onto the sidebar) can leave the
 // tooltip stuck — bind mouseleave on the container to clear it. Bound to the
@@ -183,18 +207,42 @@ document.addEventListener('mousedown', (e) => {
   closePopup();
 });
 
-map.on('load', async () => {
+// deck.gl MapboxOverlay (interleaved:true) calls triggerRepaint() every frame,
+// keeping _styleDirty=true permanently so map.loaded() never returns true and
+// the 'load' event never fires. Use 'style.load' instead — fires once when the
+// style JSON/sprites finish, before deck.gl's render loop starts.
+map.once('style.load', async () => {
   try {
-    const [parcels, stations, railLine] = await Promise.all([
+    const [parcels, stations, railLine, railGuideway, narratives] = await Promise.all([
       fetchJSON('data/parcels_tod.geojson'),
       fetchJSON('data/stations.geojson'),
       fetchJSON('data/rail_line.geojson'),
+      fetchJSON('data/raw/rail_transit_guideway_alignment_line.geojson'),
+      fetchJSON('data/station_narratives.json'),
     ]);
     STATE.parcels = parcels;
     STATE.stations = stations;
     STATE.railLine = railLine;
+    STATE.railGuideway = railGuideway;
+    STATE.narratives = narratives;
+    // Tour order for Prev/Next navigation. Uses the official HART station
+    // numbering (id 1 = Kualakaʻi, id 13 = Kahauiki) which IS the line's
+    // west-to-east sequence — and stays stable even when adjacent stations'
+    // longitudes flip by hundredths of a degree.
+    STATE.stationsByWest = [...stations.features].sort(
+      (a, b) => +getStationId(a) - +getStationId(b)
+    );
 
     populateStationDropdown(stations);
+    // Default to the westernmost station so the page opens at the start of
+    // the guided tour (Kualakaʻi) instead of "All stations". Setting
+    // STATE.stationId here — before refresh() runs — means the first
+    // filter pass scopes to this station, matching the narrative panel.
+    if (STATE.stationsByWest.length) {
+      STATE.stationId = String(getStationId(STATE.stationsByWest[0]));
+      const sel = document.getElementById('station-select');
+      if (sel) sel.value = STATE.stationId;
+    }
     computeFilterMaxes(parcels.features);
     buildAddressIndex();
     addLayers();
@@ -209,13 +257,36 @@ map.on('load', async () => {
     // tiles for the whole island are loaded — perfect time to harvest
     // suburb/neighbourhood centroids for the area badges.
     addAreaBadges();
-    // 3D is on by default — pose the final view and reveal the map.
+    // Rail guideway on a non-interleaved overlay — separate transparent canvas
+    // composited above MapLibre, so it's never depth-tested against parcel bars.
+    // Called after prewarmOahuTiles so deck.gl's WebGL context is fully ready.
+    // MultiLineString features (segment #10) are spread into separate paths so
+    // getPath receives a flat [[lon,lat],...] array rather than nested arrays.
+    railPaths = STATE.railGuideway.features.flatMap(f =>
+      f.geometry.type === 'MultiLineString'
+        ? f.geometry.coordinates
+        : [f.geometry.coordinates]
+    );
+    rebuildRailLayers();
+    startPulseLoop();
+
+    // Initial narrative + camera. selectStation already ran via the default
+    // station set above (refresh path) — now compose the narrative panel
+    // and pose the camera over the westernmost station before revealing.
+    renderNarrative();
+    const firstStation = STATE.stationsByWest[0];
+    const firstCoords = firstStation ? firstStation.geometry.coordinates : [-157.95, 21.38];
     map.jumpTo({
-      center: [-157.95, 21.38],
-      zoom: 15,
-      pitch: 60,
+      center: firstCoords,
+      zoom: 14.5,
+      pitch: 55,
       bearing: 0,
     });
+    // Force a deck.gl re-render after the camera jump. Without this, the
+    // parcel layer occasionally stays blank on first paint until the user
+    // interacts (clicks a tab, drags the map, etc.) — the prewarm-then-jump
+    // sequence appears to leave deck.gl's view state out of sync.
+    refreshLayer();
     document.getElementById('map').classList.add('ready');
   } catch (err) {
     console.error(err);
@@ -340,7 +411,7 @@ function thresholdRange(range, max) {
 function populateStationDropdown(stations) {
   const sel = document.getElementById('station-select');
   const features = [...(stations.features || [])];
-  features.sort((a, b) => getStationName(a).localeCompare(getStationName(b)));
+  features.sort((a, b) => +getStationId(a) - +getStationId(b));
   for (const f of features) {
     const opt = document.createElement('option');
     opt.value = String(getStationId(f));
@@ -383,18 +454,10 @@ function addLayers() {
     },
   });
 
-  // Station points (cyan dot at ground level — the "pin" beneath the label).
-  map.addLayer({
-    id: 'stations-circle',
-    type: 'circle',
-    source: 'stations',
-    paint: {
-      'circle-radius': 6,
-      'circle-color': '#0ea5e9',
-      'circle-stroke-width': 2,
-      'circle-stroke-color': '#fff',
-    },
-  });
+  // Station "pin" dots are rendered as a deck.gl ScatterplotLayer on the
+  // non-interleaved railOverlay (alongside the rail-glow/rail-stroke paths),
+  // so they composite above the 3D parcel bars instead of being buried at
+  // ground level. See the railOverlay.setProps call in map.once('style.load').
 
   // Floating glass-panel station labels — HTML markers (not symbol layer)
   // because symbol layers have no Z-axis. The negative pixel offset lifts
@@ -403,7 +466,7 @@ function addLayers() {
   // SVG icon is the Material "directions_subway" path; currentColor lets
   // it inherit from the badge text color.
   const TRAIN_SVG =
-    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" ' +
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" ' +
     'aria-hidden="true">' +
     '<path d="M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2.23l' +
     '2-2h3.54l2 2H18v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-3.58-4-8-4zM' +
@@ -413,18 +476,56 @@ function addLayers() {
   for (const f of STATE.stations.features) {
     const el = document.createElement('div');
     el.className = 'station-floater';
+
+    // Tour Prev button — hidden by default via CSS; visible only when the
+    // chip carries .active. stopPropagation prevents the click bubbling to
+    // the deck.gl canvas (which would otherwise miss-fire a parcel click).
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'chip-tour-btn chip-tour-prev';
+    prevBtn.textContent = '‹';
+    prevBtn.setAttribute('aria-label', 'Previous station');
+    prevBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stepTour(-1);
+    });
+
+    // Chip body — the icon + name. Wrapped so the buttons can flex around it.
+    // Clicking the body jumps the tour to this station (any chip works as a
+    // shortcut, not just Prev/Next on the active chip). stopPropagation
+    // prevents the click bubbling through to deck.gl's parcel hit-test.
+    const body = document.createElement('span');
+    body.className = 'station-floater-body';
+    body.addEventListener('click', (e) => {
+      e.stopPropagation();
+      goToStation(f);
+    });
     const icon = document.createElement('span');
     icon.className = 'station-icon';
     icon.innerHTML = TRAIN_SVG;
     const name = document.createElement('span');
     name.className = 'station-name';
     name.textContent = getStationName(f);
-    el.appendChild(icon);
-    el.appendChild(name);
+    body.appendChild(icon);
+    body.appendChild(name);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'chip-tour-btn chip-tour-next';
+    nextBtn.textContent = '›';
+    nextBtn.setAttribute('aria-label', 'Next station');
+    nextBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stepTour(+1);
+    });
+
+    el.append(prevBtn, body, nextBtn);
     new maplibregl.Marker({ element: el, offset: [0, -32], anchor: 'bottom' })
       .setLngLat(f.geometry.coordinates)
       .addTo(map);
+    // Stash a reference keyed by numeric station id so renderNarrative()
+    // can toggle .active on the chip of whichever station is being narrated.
+    chipRefs.set(+getStationId(f), el);
   }
+
 }
 
 // Reporting-year label used everywhere we surface dollar figures — keep
@@ -500,6 +601,9 @@ function buildPopupHTML(p) {
       <div class="parcel-popup__row"><span class="k">Net</span><span class="v${netPosClass(annualNet)}">${fmtUSDk(annualNet)}</span></div>
     </div>
 
+    <button type="button" class="parcel-popup__more-toggle" aria-expanded="false">More ▾</button>
+
+    <div class="parcel-popup__more" hidden>
     <div class="parcel-popup__section">
       <h3>Per acre</h3>
       <div class="parcel-popup__row"><span class="k">Revenue / ac</span><span class="v">${fmtUSDk(+p.rev_per_ac)}</span></div>
@@ -526,11 +630,18 @@ function buildPopupHTML(p) {
         ${stationNames.map(escapeHTML).join(', ')}
       </div>
     </div>` : ''}
+    </div>
   `;
 }
 
 // Place the popup near (x, y) — preferring right-of-click — and flip sides
 // or clamp vertically if it would overflow the viewport.
+//
+// Avoidance: if the proposed rect would overlap the floating narrative card
+// (the guided-tour card centered on the map), shift the popup above the
+// card, then below, then beside, in that order. The narrative card is the
+// only on-map UI big enough to compete with the popup; ignore it when
+// collapsed (~50px tall, barely in the way).
 function positionPopup(x, y) {
   const rect = map.getContainer().getBoundingClientRect();
   const w = popupEl.offsetWidth || 290;
@@ -543,6 +654,48 @@ function positionPopup(x, y) {
   px = Math.max(margin, px);
   let py = rect.top + y - h / 2;
   py = Math.max(rect.top + margin, Math.min(py, rect.bottom - h - margin, window.innerHeight - h - margin));
+
+  // Narrative-card avoidance. The popup rect proposed above might overlap
+  // the narrative card — if so, try to nudge it out of the way without
+  // losing the click-anchored feel.
+  const card = document.getElementById('map-narrative-card');
+  if (card && !card.hidden && !card.classList.contains('collapsed')) {
+    const cardRect = card.getBoundingClientRect();
+    const gap = 12;
+    const overlapsX = px < cardRect.right + gap && px + w > cardRect.left - gap;
+    const overlapsY = py < cardRect.bottom + gap && py + h > cardRect.top - gap;
+    if (overlapsX && overlapsY) {
+      // 1. Try above the card.
+      const above = cardRect.top - gap - h;
+      if (above >= rect.top + margin) {
+        py = above;
+      } else {
+        // 2. Try below the card.
+        const below = cardRect.bottom + gap;
+        if (below + h <= rect.bottom - margin && below + h <= window.innerHeight - margin) {
+          py = below;
+        } else {
+          // 3. Try beside the card — prefer the side the click came from
+          // so the popup feels click-anchored even when nudged.
+          const clickAbsX = rect.left + x;
+          const cardCenterX = cardRect.left + cardRect.width / 2;
+          const leftSlot = cardRect.left - gap - w;
+          const rightSlot = cardRect.right + gap;
+          const leftFits = leftSlot >= rect.left + margin;
+          const rightFits = rightSlot + w <= rect.right - margin
+                         && rightSlot + w <= window.innerWidth - margin;
+          const clickIsRight = clickAbsX > cardCenterX;
+          if (clickIsRight && rightFits)      px = rightSlot;
+          else if (!clickIsRight && leftFits) px = leftSlot;
+          else if (leftFits)                  px = leftSlot;
+          else if (rightFits)                 px = rightSlot;
+          // 4. If nothing fits, leave at the original spot — viewport too
+          // narrow to avoid; the z-index stack lets the popup win.
+        }
+      }
+    }
+  }
+
   popupEl.style.left = px + 'px';
   popupEl.style.top  = py + 'px';
 }
@@ -554,6 +707,17 @@ function openPopup(props, x, y) {
   // Close button has to be wired after innerHTML is set.
   const closeBtn = popupEl.querySelector('.parcel-popup__close');
   if (closeBtn) closeBtn.addEventListener('click', closePopup);
+  const moreBtn = popupEl.querySelector('.parcel-popup__more-toggle');
+  const moreEl  = popupEl.querySelector('.parcel-popup__more');
+  if (moreBtn && moreEl) {
+    moreBtn.addEventListener('click', () => {
+      const expanded = !moreEl.hidden;
+      moreEl.hidden = expanded;
+      moreBtn.setAttribute('aria-expanded', String(!expanded));
+      moreBtn.textContent = expanded ? 'More ▾' : 'Less ▴';
+      positionPopup(x, y);
+    });
+  }
   positionPopup(x, y);
   refreshLayer();
 }
@@ -660,8 +824,12 @@ function buildParcelLayer() {
   });
 }
 
+function getLayers() {
+  return [buildParcelLayer()];
+}
+
 function refreshLayer() {
-  overlay.setProps({ layers: [buildParcelLayer()] });
+  overlay.setProps({ layers: getLayers() });
 }
 
 function handleHover({ object, x, y }) {
@@ -687,6 +855,22 @@ function wireUI() {
   document.getElementById('station-select').addEventListener('change', (e) => {
     selectStation(e.target.value);
   });
+
+  // Floating tour card — dismiss/reopen persistence. The × button fully
+  // hides the card; the user reopens it by clicking any station chip
+  // (handled in goToStation). State persists across reloads via localStorage.
+  const card = document.getElementById('map-narrative-card');
+  const closeBtn = document.getElementById('map-narrative-close');
+  if (card && localStorage.getItem('tod-narrative-dismissed') === '1') {
+    card.hidden = true;
+  }
+  if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      card.hidden = true;
+      localStorage.setItem('tod-narrative-dismissed', '1');
+    });
+  }
 
   document.querySelectorAll('#mode-toggle .seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -721,6 +905,14 @@ function wireUI() {
   if (chkRailCip) {
     chkRailCip.addEventListener('change', () => {
       STATE.railCipOn = chkRailCip.checked;
+      refresh();
+    });
+  }
+
+  const chkAllParcels = document.getElementById('chk-all-parcels');
+  if (chkAllParcels) {
+    chkAllParcels.addEventListener('change', () => {
+      STATE.showAllParcels = chkAllParcels.checked;
       refresh();
     });
   }
@@ -1219,19 +1411,6 @@ function wireAddressSearch() {
   });
 }
 
-// Replace the static "all values per acre" with a metric-specific
-// explanation so the panel itself tells the user what the active mode
-// actually shows. Keeps technical jargon out — plain English.
-const SEG_CAPTIONS = {
-  revenue: 'Annual <strong>property tax paid</strong> by the parcel, per acre.',
-  cost:    'Annual <strong>cost to the city</strong> for road, water, and sewer service per acre — operating and capital combined.',
-  net:     '<strong>Revenue minus cost</strong>, per acre. Green pays for itself; red is a net loss.',
-};
-
-function updateSegCaption() {
-  const el = document.getElementById('seg-caption');
-  if (el) el.innerHTML = SEG_CAPTIONS[STATE.mode] || 'all values per acre';
-}
 
 function rangeLabel(range, max) {
   const [lo, hi] = range;
@@ -1317,15 +1496,17 @@ function refresh() {
 
   STATE.filtered = (STATE.parcels?.features || []).filter((f) => {
     const p = f.properties;
-    if (filterSid !== null && !(p?.station_ids || []).includes(filterSid)) return false;
-    if (!Number.isFinite(+p?.[colorKey])) return false;
-    // TOD scope: parcels in adopted TOD areas always pass; otherwise check
-    // walking distance. Parcels with null walk_dist_ft (unreachable, ~10
-    // out of 19,872) are kept so the slider can't silently drop them.
-    if (!p?.in_tod_area) {
-      const wd = +p?.walk_dist_ft;
-      if (Number.isFinite(wd) && wd > walkMaxFt) return false;
+    if (!STATE.showAllParcels) {
+      if (filterSid !== null && !(p?.station_ids || []).includes(filterSid)) return false;
+      // TOD scope: parcels in adopted TOD areas always pass; otherwise check
+      // walking distance. Parcels with null walk_dist_ft (unreachable, ~10
+      // out of 19,872) are kept so the slider can't silently drop them.
+      if (!p?.in_tod_area) {
+        const wd = +p?.walk_dist_ft;
+        if (Number.isFinite(wd) && wd > walkMaxFt) return false;
+      }
     }
+    if (!Number.isFinite(+p?.[colorKey])) return false;
     const av = +p?.assessed_value;
     if (avLo > 0 && !(av >= avLo)) return false;
     if (avHi !== Infinity && !(av <= avHi)) return false;
@@ -1378,8 +1559,8 @@ function refresh() {
   refreshLayer();
   renderLegend();
   renderSummary();
+  renderNarrative();
   updateFilterUI();
-  updateSegCaption();
 }
 
 function computeDomain(features, key, symmetric) {
@@ -1412,20 +1593,36 @@ function renderLegend() {
   const palette = STATE.mode === 'net' ? DIVERGING_RWG : VIRIDIS;
   const [lo, hi] = STATE.domain;
   const gradient = `linear-gradient(to right, ${palette.join(', ')})`;
-  const heightLine = STATE.extrude
-    ? `<div class="muted" style="font-size:10px;margin-top:6px;">Bar height: revenue / ac</div>`
-    : '';
   const railRate = STATE.filtered.length ? (+STATE.filtered[0].properties.rail_cip_per_ac || 0) : 0;
   const railOnAndRelevant = STATE.railCipOn && railRate > 0 && STATE.mode !== 'revenue';
   const railLine = railOnAndRelevant
-    ? `<div class="muted" style="font-size:10px;margin-top:6px;">+ rail CIP ${fmtUSDk(railRate)}/ac uniform across corridor</div>`
+    ? `<div class="muted" style="font-size:10px;margin-top:4px;">+ rail CIP ${fmtUSDk(railRate)}/ac uniform across corridor</div>`
+    : '';
+  const loColor  = palette[0];
+  const hiColor  = palette[palette.length - 1];
+  // Mix a palette endpoint with white (t=0.6) so dark colors become legible
+  // on the dark sidebar. Keeps the hue recognizable while boosting luminance.
+  const lighten = (hex, t = 0.6) => {
+    const [r, g, b] = hexToRgb(hex);
+    const lr = Math.round(r + (255 - r) * t);
+    const lg = Math.round(g + (255 - g) * t);
+    const lb = Math.round(b + (255 - b) * t);
+    return `rgb(${lr},${lg},${lb})`;
+  };
+  const loText  = lighten(loColor);
+  const hiText  = lighten(hiColor);
+  const midBadge = STATE.mode === 'net'
+    ? `<span class="legend-badge" style="background:rgba(255,255,255,0.10);border-color:rgba(255,255,255,0.28);color:rgba(255,255,255,0.75);">0</span>`
     : '';
   legend.innerHTML = `
-    <div class="legend-title muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">Color: ${METRIC_LABELS[STATE.mode]}</div>
+    <div class="legend-title">Color: ${METRIC_LABELS[STATE.mode]}</div>
     <div class="legend-bar" style="background:${gradient};"></div>
-    <div class="legend-labels"><span>${fmtUSDk(lo)}</span>${STATE.mode === 'net' ? '<span>0</span>' : ''}<span>${fmtUSDk(hi)}</span></div>
+    <div class="legend-labels">
+      <span class="legend-badge" style="background:${loColor}33;border-color:${loColor}99;color:${loText};">${fmtUSDk(lo)}</span>
+      ${midBadge}
+      <span class="legend-badge" style="background:${hiColor}33;border-color:${hiColor}99;color:${hiText};">${fmtUSDk(hi)}</span>
+    </div>
     ${railLine}
-    ${heightLine}
   `;
 }
 
@@ -1523,6 +1720,287 @@ function renderSummary() {
       </ol>
     </div>
   `;
+}
+
+// ============================================================
+// Per-station narrative tour
+// ============================================================
+
+// Rebuilds the railOverlay's layer set: rail glow + stroke (static), the
+// base station-dots layer (all 13, static styling), and an optional
+// pulsing "active dot" layer for whichever station the tour is on. Called
+// once on initial load and again every animation frame for the pulse —
+// deck.gl diffs cheaply when only one ScatterplotLayer's props change.
+function rebuildRailLayers() {
+  if (!railPaths || !STATE.stations) return;
+
+  const activeId = STATE.stationId ? +STATE.stationId : null;
+  const activeStation = activeId !== null
+    ? STATE.stations.features.find((f) => +getStationId(f) === activeId)
+    : null;
+
+  // Sine wave: radius oscillates 8 → 14px over ~1.5 sec (pulsePhase += 0.07 per frame).
+  const activeRadius = 11 + 3 * Math.sin(pulsePhase);
+
+  const layers = [
+    new deck.PathLayer({
+      id: 'rail-glow',
+      data: railPaths,
+      getPath: (d) => d,
+      getColor: [255, 255, 255, 100],
+      getWidth: 26,
+      widthUnits: 'pixels',
+      widthMinPixels: 14,
+      capRounded: true,
+      jointRounded: true,
+      pickable: false,
+    }),
+    new deck.PathLayer({
+      id: 'rail-stroke',
+      data: railPaths,
+      getPath: (d) => d,
+      getColor: [0, 210, 240, 255],
+      getWidth: 8,
+      widthUnits: 'pixels',
+      widthMinPixels: 4,
+      capRounded: true,
+      jointRounded: true,
+      pickable: false,
+    }),
+    new deck.ScatterplotLayer({
+      id: 'station-dots-base',
+      data: STATE.stations.features,
+      getPosition: (f) => f.geometry.coordinates,
+      getRadius: 7,
+      radiusUnits: 'pixels',
+      getFillColor: [255, 255, 255, 255],
+      getLineColor: [0, 210, 240, 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 2,
+      stroked: true,
+      filled: true,
+      pickable: false,
+    }),
+  ];
+
+  if (activeStation) {
+    layers.push(new deck.ScatterplotLayer({
+      id: 'station-dots-active',
+      data: [activeStation],
+      getPosition: (f) => f.geometry.coordinates,
+      getRadius: activeRadius,
+      radiusUnits: 'pixels',
+      getFillColor: [0, 210, 240, 180],     // cyan fill — pops above the white base dot
+      getLineColor: [255, 255, 255, 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 2.5,
+      stroked: true,
+      filled: true,
+      pickable: false,
+    }));
+  }
+
+  railOverlay.setProps({ layers });
+}
+
+// Drives the active station's pulse via requestAnimationFrame. deck.gl is
+// already on its own render loop, so we're not creating an idle-CPU loop —
+// just adjusting one layer's props each frame.
+function startPulseLoop() {
+  if (pulseRaf) return;
+  function frame() {
+    pulsePhase += 0.07;
+    if (pulsePhase > Math.PI * 2) pulsePhase -= Math.PI * 2;
+    rebuildRailLayers();
+    pulseRaf = requestAnimationFrame(frame);
+  }
+  pulseRaf = requestAnimationFrame(frame);
+}
+
+// Strip the trailing " Station" suffix from the GeoJSON name so it matches
+// the bare keys ("Kualakaʻi", "Hālawa", etc.) used in station_narratives.json.
+function narrativeKeyFor(featureName) {
+  return featureName.replace(/\s+Station$/i, '');
+}
+
+// Compute the same revenue/cost aggregates renderSummary uses, but returned
+// as an object so the narrative panel can read the totals without parsing
+// HTML. Single pass over STATE.filtered. Respects the Rail CIP toggle.
+function computeFilteredTotals() {
+  let totalRev = 0, totalCost = 0;
+  const revByBucket = {};
+  for (const b of Object.keys(LAND_USE_BUCKETS)) revByBucket[b] = 0;
+  let revOther = 0;
+
+  for (const f of STATE.filtered) {
+    const p = f.properties;
+    const acres = +p.area_ac;
+    if (!Number.isFinite(acres)) continue;
+    const rev = Number.isFinite(+p.rev_per_ac) ? +p.rev_per_ac * acres : 0;
+    const railAdj = STATE.railCipOn ? (+p.rail_cip_per_ac || 0) : 0;
+    const cost = Number.isFinite(+p.cost_per_ac)
+      ? (+p.cost_per_ac + railAdj) * acres
+      : 0;
+    totalRev += rev;
+    totalCost += cost;
+    const bucket = LAND_USE_TO_BUCKET[p.land_use];
+    if (bucket) revByBucket[bucket] += rev;
+    else revOther += rev;
+  }
+
+  return {
+    parcels: STATE.filtered.length,
+    totalRev,
+    totalCost,
+    totalNet: totalRev - totalCost,
+    revByBucket,
+    revOther,
+  };
+}
+
+// Format the 4-stat mini-grid in the narrative panel. Dominant use is the
+// land-use bucket contributing the largest share of revenue.
+function buildStatsHTML(totals) {
+  const buckets = Object.entries(totals.revByBucket)
+    .filter(([, v]) => v > 0)
+    .sort(([, a], [, b]) => b - a);
+  let dominant = '—';
+  if (buckets.length && totals.totalRev > 0) {
+    const [bucket, value] = buckets[0];
+    const pct = Math.round((value / totals.totalRev) * 100);
+    const label = bucket === 'PublicService' ? 'Public Service' : bucket;
+    dominant = `${label} · ${pct}%`;
+  }
+  return `
+    <div class="narrative-stat"><span class="k">Parcels</span><span class="v">${fmtInt.format(totals.parcels)}</span></div>
+    <div class="narrative-stat"><span class="k">Dominant use</span><span class="v">${escapeHTML(dominant)}</span></div>
+    <div class="narrative-stat"><span class="k">Revenue / yr</span><span class="v">${fmtUSDk(totals.totalRev)}</span></div>
+    <div class="narrative-stat"><span class="k">Cost / yr</span><span class="v">${fmtUSDk(totals.totalCost)}</span></div>
+  `;
+}
+
+// Populate the floating map narrative card with the active station's
+// authored framing and live computed totals. Also toggles .active on the
+// map chip (which reveals the chip-attached Prev / Next buttons) and sets
+// the chip buttons' disabled state for the tour endpoints.
+function renderNarrative() {
+  const card = document.getElementById('map-narrative-card');
+  if (!card) return;
+  const sortedList = STATE.stationsByWest || [];
+  if (!sortedList.length) return;
+
+  const nameEl    = card.querySelector('.map-narrative-name');
+  const counterEl = card.querySelector('.map-narrative-counter');
+  const proseEl   = card.querySelector('.map-narrative-prose');
+  const themeEl   = card.querySelector('.map-narrative-theme');
+  const statsEl   = card.querySelector('.map-narrative-stats');
+  const verdictEl = card.querySelector('.map-narrative-verdict');
+
+  const activeId = STATE.stationId ? +STATE.stationId : null;
+  const idx = activeId !== null
+    ? sortedList.findIndex((f) => +getStationId(f) === activeId)
+    : -1;
+
+  // Helper: update the chip-attached Prev/Next buttons' disabled state. The
+  // buttons live on the chip itself (one pair per station), but only the
+  // active station's chip shows them via CSS — so we only need to update
+  // the active chip's pair. All other chips' buttons stay enabled in the
+  // DOM but are hidden.
+  const updateChipButtons = () => {
+    chipRefs.forEach((el, sid) => {
+      const isActive = sid === activeId;
+      el.classList.toggle('active', isActive);
+      if (isActive) {
+        const prev = el.querySelector('.chip-tour-prev');
+        const next = el.querySelector('.chip-tour-next');
+        if (prev) prev.disabled = idx <= 0;
+        if (next) next.disabled = idx >= sortedList.length - 1;
+      }
+    });
+  };
+
+  // "All stations" mode — corridor-wide framing, no live numbers.
+  if (idx === -1) {
+    nameEl.textContent = 'All stations';
+    nameEl.classList.add('muted');
+    counterEl.textContent = `${sortedList.length} stations · full corridor`;
+    proseEl.textContent = 'Showing the entire Skyline corridor. Pick a station from the dropdown to start the guided west-to-east tour.';
+    themeEl.textContent = '';
+    statsEl.innerHTML = '';
+    verdictEl.textContent = '';
+    verdictEl.className = 'map-narrative-verdict';
+    chipRefs.forEach((el) => el.classList.remove('active'));
+    return;
+  }
+
+  const station = sortedList[idx];
+  const fullName = getStationName(station);
+  const key = narrativeKeyFor(fullName);
+  const narr = (STATE.narratives && STATE.narratives[key]) || {};
+
+  nameEl.textContent = fullName;
+  nameEl.classList.remove('muted');
+  counterEl.textContent = `Station ${idx + 1} of ${sortedList.length}`;
+  proseEl.textContent = narr.framing || '(No narrative written for this station yet — add one to data/station_narratives.json.)';
+  themeEl.textContent = narr.theme || '';
+
+  const totals = computeFilteredTotals();
+  statsEl.innerHTML = buildStatsHTML(totals);
+
+  if (totals.parcels === 0) {
+    verdictEl.textContent = 'No parcels in current filter';
+    verdictEl.className = 'map-narrative-verdict empty';
+  } else if (totals.totalNet >= 0) {
+    verdictEl.textContent = `Breaks even · +${fmtUSDk(totals.totalNet)} / yr`;
+    verdictEl.className = 'map-narrative-verdict breaks-even';
+  } else {
+    verdictEl.textContent = `Net loss · ${fmtUSDk(totals.totalNet)} / yr`;
+    verdictEl.className = 'map-narrative-verdict net-loss';
+  }
+
+  updateChipButtons();
+}
+
+// Jump the guided tour to a specific station feature. Updates the dropdown,
+// filters, and summary via selectStation, then flies the camera at the
+// tour's preferred angle. Used by both stepTour (Prev/Next) and the chip
+// click handlers (jump to any station by clicking its label).
+function goToStation(stationFeature) {
+  if (!stationFeature) return;
+  const id = String(getStationId(stationFeature));
+  // Clicking a chip always reopens the narrative card if the user had
+  // previously dismissed it — the chip *is* the reopen affordance.
+  const card = document.getElementById('map-narrative-card');
+  if (card && card.hidden) {
+    card.hidden = false;
+    localStorage.setItem('tod-narrative-dismissed', '0');
+  }
+  // No-op fast-path: clicking the already-active chip just re-centers the
+  // camera without redoing the filter pass (which is expensive on 19k parcels).
+  if (id !== STATE.stationId) selectStation(id);
+  map.flyTo({
+    center: stationFeature.geometry.coordinates,
+    zoom: 14.5,
+    pitch: 55,
+    bearing: 0,
+    duration: 1400,
+  });
+}
+
+// Step the guided tour by ±1 station along the west-east line order.
+function stepTour(delta) {
+  const sortedList = STATE.stationsByWest || [];
+  if (!sortedList.length) return;
+  const activeId = STATE.stationId ? +STATE.stationId : null;
+  const currentIdx = activeId !== null
+    ? sortedList.findIndex((f) => +getStationId(f) === activeId)
+    : -1;
+  // From "All stations" mode, Next opens at station 1; Prev does nothing.
+  const nextIdx = currentIdx === -1
+    ? (delta > 0 ? 0 : -1)
+    : currentIdx + delta;
+  if (nextIdx < 0 || nextIdx >= sortedList.length) return;
+  goToStation(sortedList[nextIdx]);
 }
 
 // HTML attribute encoder — keeps newlines (\n) intact since the tooltip

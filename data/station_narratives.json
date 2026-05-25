@@ -1,0 +1,54 @@
+{
+  "Kualakaʻi": {
+    "framing": "Westernmost stop, anchored by the UH West Oahu campus and the Hoʻopili master-planned community now rising from former cane fields. The lowest-density station on the line — large agricultural parcels, single-family subdivisions in progress, and state-owned UH land.",
+    "theme": "A long-horizon bet: today's open land is tomorrow's TOD density. Does the per-acre revenue catch up before the rail cost compounds?"
+  },
+  "Keoneʻae": {
+    "framing": "UH West Oahu academic core. Mostly state-owned campus land paying $0 in property tax, ringed by Hoʻopili residential parcels just coming online.",
+    "theme": "When the anchor tenant is a tax-exempt university, the surrounding residential ring has to carry the infrastructure load alone."
+  },
+  "Honouliuli": {
+    "framing": "Heart of the Hoʻopili new-build neighborhood. Detached single-family on small lots, a few neighborhood retail pads, and remnant ag parcels at the edges.",
+    "theme": "Single-family residential is the dominant land use along most of the corridor — and the worst per-acre tax generator. Does new construction at higher density change the math?"
+  },
+  "Hōʻaeʻae": {
+    "framing": "West Loch / Waipahu border. Postwar single-family subdivisions, scattered duplex conversions, and Navy-adjacent open land toward the southern edge.",
+    "theme": "Mid-century suburban platting locks in low FAR — even with the rail here, zoning ceilings cap how much revenue per acre is reachable without an upzone."
+  },
+  "Pouhala": {
+    "framing": "Old Waipahu — the sugar-mill town. Dense low-rise residential on plantation-era lots, walkable storefronts along Farrington Highway, the historic mill site itself.",
+    "theme": "One of the few naturally walkable, pre-existing TOD-like fabrics on the line. Already breaks even? Or do the small lots and old buildings still leave it short?"
+  },
+  "Hālaulani": {
+    "framing": "Leeward Community College's doorstep. LCC campus dominates the immediate area (tax-exempt state land); surrounding parcels are low-density Pearl City residential.",
+    "theme": "Another tax-exempt anchor flanked by single-family. The pattern repeats — and the financial result usually does too."
+  },
+  "Waiawa": {
+    "framing": "Pearl City Peninsula side. Suburban residential subdivisions backing onto Pearl Harbor's West Loch. A small commercial node near Kamehameha Highway.",
+    "theme": "Pure bedroom-community geometry: residential per-acre tax × suburban acres-per-unit = the structural shortfall the project is trying to quantify."
+  },
+  "Kalauao": {
+    "framing": "Pearl City town center — and the Skyline's biggest retail node. Pearlridge Shopping Center, hotels, surrounding commercial strips, plus the dense residential ring on Kamehameha Highway.",
+    "theme": "Commercial and hotel land generate tax revenue per acre orders of magnitude above residential. If any leeward station breaks even, this is the one."
+  },
+  "Hālawa": {
+    "framing": "Aloha Stadium redevelopment site. State-owned stadium land pays no property tax; the surrounding fabric is light industrial, auto dealerships, and a band of residential at the Aiea boundary.",
+    "theme": "The state's planned Aloha Stadium District redevelopment is the wildcard — today this station scores poorly because the centerpiece pays $0, but the entitlement is for a major mixed-use district."
+  },
+  "Makalapa": {
+    "framing": "Pearl Harbor's eastern flank. Federal/military land dominates south of the corridor (also tax-exempt); to the north, a mix of Aiea residential and small-format commercial.",
+    "theme": "Two tax-exempt land empires (Pearl Harbor + Aloha Stadium) bracket this segment. Whatever revenue exists has to come from the thin residential strip in between."
+  },
+  "Lelepaua": {
+    "framing": "Honolulu International Airport approach. Airport-adjacent hotels, the rental car center, and commercial parcels feeding the visitor economy. Some industrial along Nimitz.",
+    "theme": "Hotel and visitor-economy parcels are high-revenue land uses. But the airport itself is state-owned — the question is whether the surrounding hotel ring is enough."
+  },
+  "Āhua": {
+    "framing": "Mapunapuna industrial district. Warehouses, distribution centers, auto service, light manufacturing. The high-volume freight and industrial fabric that quietly powers Honolulu.",
+    "theme": "Industrial parcels generate moderate revenue per acre but consume relatively little infrastructure per acre — historically these have been among the better break-even land uses."
+  },
+  "Kahauiki": {
+    "framing": "Iwilei / Kalihi border — port-adjacent industrial, transitioning to mixed use. Kahauiki Village (homeless housing redevelopment) sits within walking distance, with downtown Honolulu beginning just east.",
+    "theme": "Easternmost stop in the operating segment. As the corridor approaches downtown Honolulu the land mix shifts toward the high-revenue uses (port, commercial, multi-family) that come closest to paying for themselves."
+  }
+}

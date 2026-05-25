@@ -258,8 +258,44 @@ select, button, input {
   transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
 
-.seg-btn:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
-.seg-btn:last-child  { border-top-right-radius: 6px; border-bottom-right-radius: 6px; border-right: none; }
+.seg > .seg-btn:first-child {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  /* Slightly narrower than the split (flex:1) so Cost/Revenue have a bit
+     more horizontal room — keeps Net dominant without crowding the pair. */
+  flex: 0.85;
+  /* Stretch height to match the stacked split column. */
+  padding: 14px 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Split container holds Cost (top) + Revenue (bottom) stacked vertically
+   inside a single tab slot. */
+.seg-split {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  overflow: hidden;
+}
+.seg-split .seg-btn {
+  flex: 1;
+  border-radius: 0;
+  border-right: none;
+  border-bottom: 1px solid var(--border-soft);
+  padding: 6px 4px 6px 10px;
+  font-size: 12.5px;
+  text-align: left;
+  /* Left accent strip tied to the diverging palette: Cost = red end,
+     Revenue = green end. Makes the pair visually "halves of Net." */
+  border-left: 3px solid transparent;
+}
+.seg-split .seg-btn:last-child { border-bottom: none; }
+.seg-split .seg-btn[data-mode="cost"]    { border-left-color: #d73027; }
+.seg-split .seg-btn[data-mode="revenue"] { border-left-color: #66bd63; }
+
 .seg-btn:hover {
   background: rgba(202, 210, 197, 0.06);
   opacity: 1;
@@ -269,6 +305,15 @@ select, button, input {
   color: var(--c-white);
   font-weight: 600;
   opacity: 1;
+}
+/* Active states for the split half-tabs use a tinted version of their
+   accent color instead of the generic teal, so the active state visually
+   echoes the diverging palette the user is filtering by. */
+.seg-split .seg-btn[data-mode="cost"].active {
+  background: rgba(215, 48, 39, 0.32);
+}
+.seg-split .seg-btn[data-mode="revenue"].active {
+  background: rgba(102, 189, 99, 0.32);
 }
 
 /* Metric button tooltips are handled by a body-level #seg-tooltip element
@@ -471,12 +516,6 @@ select, button, input {
   background: rgba(107, 158, 120, 0.10);
   border: 1px solid rgba(107, 158, 120, 0.22);
 }
-.walk-dist-help {
-  font-size: 10.5px;
-  color: var(--muted);
-  line-height: 1.45;
-  margin-top: 2px;
-}
 
 /* Dual-thumb range. Two range inputs are stacked over a shared track. The
    trick: pointer-events:none on the inputs (so both don't block each
@@ -659,7 +698,17 @@ select, button, input {
 .legend {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+  /* Breathing room from the metric tab strip above. */
+  margin-top: 14px;
+}
+
+.legend-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .legend-bar {
@@ -673,8 +722,18 @@ select, button, input {
   display: flex;
   justify-content: space-between;
   font-size: 12.5px;
-  color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.legend-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.55);
 }
 
 /* Summary card — the focal element of the sidebar. Layered surface
@@ -1291,6 +1350,26 @@ body.sidebar-collapsed .search-box {
   border-color: rgba(185, 28, 28, 0.34);
 }
 
+.parcel-popup__more-toggle {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 4px 18px 10px;
+  padding: 6px 10px;
+  background: rgba(107, 158, 120, 0.10);
+  border: 1px solid rgba(107, 158, 120, 0.28);
+  border-radius: 8px;
+  color: rgba(202, 210, 197, 0.92);
+  font: 600 11.5px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.parcel-popup__more-toggle:hover {
+  background: rgba(107, 158, 120, 0.18);
+  border-color: rgba(107, 158, 120, 0.45);
+}
+
 /* Landlocked warning chip — translucent brick. */
 .parcel-popup__chip {
   display: inline-block;
@@ -1310,30 +1389,56 @@ body.sidebar-collapsed .search-box {
    coordinates, lifted via Marker offset and styled translucent so they
    read like little plates hovering above the rail line). The train icon
    sits to the left of the station name, separated by a small gap. */
+/* Explicit stacking so station chips are ALWAYS above the non-interleaved
+   rail overlay canvas (which sits at z-index:auto inside .maplibregl-map),
+   and area badges sit behind both. Without this the order is DOM-source
+   dependent and could flip if marker insertion timing changes. */
+.maplibregl-marker { z-index: 5; }
+.station-floater   { z-index: 6; }
+.area-badge        { z-index: 3; }
+
 .station-floater {
+  /* No `position: relative` — that would override MapLibre's
+     `.maplibregl-marker { position: absolute }` and break marker placement.
+     The marker is already absolutely positioned, which itself creates the
+     containing block for the absolutely-positioned ::after tick below. */
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.6);
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
-  backdrop-filter: blur(8px) saturate(160%);
-  border: 1px solid rgba(14, 165, 233, 0.45);
+  background: rgba(8, 47, 73, 0.92);              /* deep navy, near-solid */
+  border: 1px solid rgba(0, 210, 240, 0.7);       /* cyan, echoes rail-stroke */
   border-radius: 6px;
-  padding: 5px 12px 5px 9px;
-  font-size: 13.5px;
+  padding: 6px 14px 6px 10px;
+  font-size: 15px;
   font-weight: 600;
-  color: #0c4a6e;
+  color: #e0f7ff;                                  /* near-white cyan */
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   user-select: none;
   transform: translateZ(0);
+}
+/* Short cyan tick descending from the chip toward the rail line — visually
+   tethers each label to its station dot on the corridor. Not long enough to
+   touch the dot at every zoom (the projection changes pixel distance), but
+   long enough to read as a pin/dropper rather than a free-floating chip. */
+.station-floater::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  background: #00d2f0;
+  box-shadow: 0 0 4px rgba(0, 210, 240, 0.6);
 }
 .station-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #0ea5e9;          /* train icon = saturated cyan, matches stations */
+  color: #67e8f9;          /* lighter cyan, reads on the navy chip */
   flex-shrink: 0;
 }
 .station-icon svg { display: block; }
@@ -1353,31 +1458,28 @@ body.sidebar-collapsed .search-box {
    so the text reads cleanly) plus a strong text-shadow; the actual fill is
    barely there, letting polygon colors come through. */
 .area-badge {
-  background: rgba(15, 23, 42, 0.12);
-  -webkit-backdrop-filter: blur(16px) saturate(150%);
-  backdrop-filter: blur(16px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.20);
-  border-radius: 5px;
-  padding: 5px 13px;
-  font-size: 14px;
-  font-weight: 700;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
   color: #f8fafc;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8), 0 0 6px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10);
+  opacity: 0.45;
   pointer-events: none;
   user-select: none;
   transform: translateZ(0);
 }
 .area-badge.neighbourhood {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 500;
   text-transform: none;
   letter-spacing: 0.03em;
-  background: rgba(15, 23, 42, 0.06);
-  padding: 4px 10px;
+  opacity: 0.35;
 }
 
 /* Rail CIP toggle — methodology note */
@@ -1387,4 +1489,247 @@ body.sidebar-collapsed .search-box {
   color: var(--text-faint, #94a3b8);
   margin-left: 2px;
   cursor: help;
+}
+
+/* ============================================================
+   Floating tour card — narrative panel composited over the map
+   ============================================================ */
+
+.map-narrative-card {
+  position: absolute;
+  /* Centered horizontally on the MAP AREA (right of the sidebar), and
+     positioned just below screen vertical center — that's where the active
+     station chip lands when stepTour flies the camera to it. Mirrors the
+     .search-box centering pattern so the same sidebar-collapse override
+     keeps it aligned. */
+  top: 54%;
+  left: calc((100vw + var(--sidebar-w)) / 2);
+  transform: translateX(-50%);
+  width: 460px;
+  max-width: min(460px, calc(100vw - var(--sidebar-w) - 40px));
+  background: rgba(8, 47, 73, 0.93);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(0, 210, 240, 0.45);
+  border-left: 3px solid #00d2f0;                  /* cyan accent rail */
+  border-radius: 8px;
+  padding: 12px 14px 14px 14px;
+  z-index: 10;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #e0f7ff;
+}
+
+body.sidebar-collapsed .map-narrative-card {
+  left: calc((100vw + var(--sidebar-w-collapsed)) / 2);
+  max-width: min(460px, calc(100vw - var(--sidebar-w-collapsed) - 40px));
+}
+
+.map-narrative-card[hidden] { display: none; }
+
+.map-narrative-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.map-narrative-title {
+  flex: 1;
+  min-width: 0;
+}
+.map-narrative-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e0f7ff;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-narrative-counter {
+  font-size: 11px;
+  color: #67e8f9;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+
+.map-narrative-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 210, 240, 0.35);
+  background: rgba(0, 30, 50, 0.55);
+  color: rgba(224, 247, 255, 0.85);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.map-narrative-close::before,
+.map-narrative-close::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+}
+.map-narrative-close::before { transform: translate(-50%, -50%) rotate(45deg); }
+.map-narrative-close::after  { transform: translate(-50%, -50%) rotate(-45deg); }
+.map-narrative-close:hover {
+  background: rgba(0, 210, 240, 0.18);
+  border-color: rgba(0, 210, 240, 0.65);
+  color: #ffffff;
+}
+.map-narrative-close:active { transform: scale(0.92); }
+.map-narrative-close:focus-visible {
+  outline: 2px solid rgba(0, 210, 240, 0.8);
+  outline-offset: 2px;
+}
+
+.map-narrative-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-narrative-prose {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.map-narrative-theme {
+  font-size: 12px;
+  font-style: italic;
+  color: #94a3b8;
+  margin: 0;
+  padding: 8px 0 0 10px;
+  border-left: 2px solid rgba(0, 210, 240, 0.35);
+}
+
+.map-narrative-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin-top: 2px;
+}
+.narrative-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+}
+.narrative-stat .k {
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+.narrative-stat .v {
+  color: #e0f7ff;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.map-narrative-verdict {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.map-narrative-verdict.breaks-even {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(16, 185, 129, 0.55);
+  color: #6ee7b7;
+}
+.map-narrative-verdict.net-loss {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+}
+.map-narrative-verdict.empty {
+  background: rgba(100, 116, 139, 0.18);
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  color: #94a3b8;
+}
+.map-narrative-verdict:empty { display: none; }
+
+/* Active-station chip highlight on the map — brightens border, fills the
+   chip background a touch, adds a cyan glow that echoes the dot pulse.
+   When .active is set, the chip's tour buttons (Prev / Next) appear. */
+.station-floater.active {
+  background: rgba(0, 60, 90, 0.96);
+  border-color: #00d2f0;
+  box-shadow: 0 0 14px rgba(0, 210, 240, 0.55),
+              0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.station-floater.active .station-icon {
+  color: #a8f0ff;                                /* even brighter when active */
+}
+
+/* Chip-attached Prev / Next buttons. Present in the DOM on every chip but
+   hidden until that chip is .active — so inactive chips look exactly as
+   they did before. pointer-events: auto overrides the chip's pointer-events:
+   none so the buttons are clickable. */
+.station-floater-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Override the chip's pointer-events:none so the body is clickable —
+     clicking any station chip jumps the tour to that station. The buttons
+     keep their own pointer-events:auto so they stay independently clickable. */
+  pointer-events: auto;
+  cursor: pointer;
+  /* Soft transition for the hover-brighten effect below */
+  transition: filter 0.15s;
+}
+.station-floater:not(.active) .station-floater-body:hover {
+  /* Inactive chip hover: subtle border/text brighten via filter so we don't
+     need to clash with the chip's existing background rules. */
+  filter: brightness(1.25);
+}
+.chip-tour-btn {
+  display: none;                                  /* hidden by default */
+  pointer-events: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 210, 240, 0.7);
+  background: rgba(0, 30, 50, 0.85);
+  color: #e0f7ff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 0 2px 0;                            /* visually centers chevron */
+  font-family: inherit;
+}
+.station-floater.active .chip-tour-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chip-tour-btn:hover:not(:disabled) {
+  background: rgba(0, 210, 240, 0.3);
+  border-color: #00d2f0;
+}
+.chip-tour-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }

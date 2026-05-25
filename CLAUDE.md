@@ -1,5 +1,19 @@
 # Revenue-Modeling-TOD — Claude rules
 
+## Local preview
+
+**Always use `npx http-server`, never `python3 -m http.server`.**
+
+Root cause: `python3 -m http.server` returns HTTP/1.0 with no byte-range support.
+PMTiles needs byte-range requests (HTTP 206 `Accept-Ranges: bytes`) to fetch
+individual tiles without downloading the full 22 MB basemap file. Python's server
+causes the basemap to fail to load entirely.
+
+Correct command (already in `.claude/launch.json`):
+```
+cd /Users/dtomkatsu/Revenue-Modeling-TOD && npx --yes http-server -p 8765 --cors -c-1
+```
+
 ## Hard rules
 
 - **EPSG:2783** (HI State Plane Z3, US-survey-feet) for ALL length / frontage operations. Never compute frontage in lat/lon degrees.

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Skyline Revenue vs. Cost — Honolulu</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="styles.css?v=4">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
 <aside id="sidebar">
@@ -25,14 +25,15 @@
   <section class="control">
     <label>Metric</label>
     <div class="seg" id="mode-toggle" role="radiogroup">
-      <button class="seg-btn" data-mode="revenue" role="radio" aria-checked="false"
-        data-tooltip="The property tax this parcel pays the city each year, divided by its size in acres. Higher = more tax revenue per acre of land. (FY2026)">Revenue</button>
-      <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false"
-        data-tooltip="What it costs the city each year to maintain the roads, water, and sewer pipes serving this parcel, divided by its size in acres. (FY2026)">Cost</button>
       <button class="seg-btn active" data-mode="net" role="radio" aria-checked="true"
         data-tooltip="Revenue minus cost. Green = the parcel pays for itself. Red = the city loses money serving it. (FY2026)">Net</button>
+      <div class="seg-split">
+        <button class="seg-btn" data-mode="cost" role="radio" aria-checked="false"
+          data-tooltip="What it costs the city each year to maintain the roads, water, and sewer pipes serving this parcel, divided by its size in acres. (FY2026)">Cost</button>
+        <button class="seg-btn" data-mode="revenue" role="radio" aria-checked="false"
+          data-tooltip="The property tax this parcel pays the city each year, divided by its size in acres. Higher = more tax revenue per acre of land. (FY2026)">Revenue</button>
+      </div>
     </div>
-    <div class="seg-caption" id="seg-caption">all values per acre</div>
     <div id="legend" class="legend"></div>
   </section>
 
@@ -43,17 +44,20 @@
         <span class="methodology-note" title="HART rail capital (~$9.1B total program) annualized over 30 years and distributed uniformly across all corridor parcels by acreage. Methodology pending review — default OFF.">(ⓘ)</span>
       </span>
     </label>
+    <label class="check toggle-all-parcels">
+      <input type="checkbox" id="chk-all-parcels">
+      <span>Show all parcels</span>
+    </label>
   </section>
 
   <section class="control">
     <div class="walk-dist-head">
-      <label for="walk-dist-slider">TOD scope</label>
+      <label for="walk-dist-slider">TOD scope <span class="methodology-note" title="Show parcels within this walking distance of any station, plus all parcels in adopted TOD districts.">(ⓘ)</span></label>
       <span class="walk-dist-val" id="walk-dist-val">1.5 mi</span>
     </div>
     <input type="range" id="walk-dist-slider" class="slider walk-dist-slider"
            min="0.25" max="1.5" step="0.05" value="1.5"
            aria-label="Maximum walking distance from station">
-    <div class="walk-dist-help">Show parcels within this walking distance of any station, plus all parcels in adopted TOD districts.</div>
   </section>
 
   <section class="control">
@@ -125,6 +129,26 @@
 
 <div id="map"></div>
 
+<!-- Floating tour card pinned to the bottom-left of the map area. Same
+     content as the old sidebar narrative panel, but composited over the
+     map so the viewer's eyes stay on the corridor while reading the story. -->
+<div id="map-narrative-card" class="map-narrative-card">
+  <div class="map-narrative-header">
+    <div class="map-narrative-title">
+      <div class="map-narrative-name muted">Loading…</div>
+      <div class="map-narrative-counter"></div>
+    </div>
+    <button id="map-narrative-close" class="map-narrative-close"
+            aria-label="Close tour panel" title="Close (click a station to reopen)"></button>
+  </div>
+  <div class="map-narrative-body">
+    <p class="map-narrative-prose"></p>
+    <p class="map-narrative-theme"></p>
+    <div class="map-narrative-stats"></div>
+    <div class="map-narrative-verdict"></div>
+  </div>
+</div>
+
 <div id="search-box" class="search-box">
   <input id="search-input" type="text" placeholder="Search address or TMK…" autocomplete="off" spellcheck="false">
   <div id="search-results" class="search-results" hidden></div>
@@ -141,6 +165,6 @@
         crossorigin="anonymous"></script>
 <script src="https://unpkg.com/deck.gl@9.0.32/dist.min.js"></script>
 <script src="https://unpkg.com/@deck.gl/mapbox@9.0.32/dist.min.js"></script>
-<script src="script.js?v=4"></script>
+<script src="script.js?v=9"></script>
 </body>
 </html>
