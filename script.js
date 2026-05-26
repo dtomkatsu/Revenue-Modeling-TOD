@@ -1050,6 +1050,7 @@ function wireUI() {
   wireAddressSearch();
   wireSummaryTooltips();
   wireSegTooltip();
+  wireMethodologyTooltips();
 }
 
 // Dual-thumb range input wiring. The two inputs occupy the same screen space;
@@ -2186,6 +2187,42 @@ function wireSummaryTooltips() {
     // pointer truly left the row.
     if (e.relatedTarget && row.contains(e.relatedTarget)) return;
     if (summaryTooltipEl) summaryTooltipEl.classList.remove('is-visible');
+  });
+}
+
+// Methodology-note "(ⓘ)" tooltips in the sidebar (Include rail CIP, TOD
+// scope, etc.). Native `title` attributes are unreliable — 1.5 s delay,
+// inconsistent rendering, can be clipped. Reuse the body-level
+// #summary-tooltip element with a sidebar-delegated handler so hovers
+// show instantly with the same dark theme as the other tooltips.
+let methodologyTooltipsWired = false;
+function wireMethodologyTooltips() {
+  if (methodologyTooltipsWired) return;
+  methodologyTooltipsWired = true;
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || !summaryTooltipEl) return;
+  sidebar.addEventListener('mouseover', (e) => {
+    const note = e.target.closest('.methodology-note[data-tooltip]');
+    if (!note) return;
+    summaryTooltipEl.textContent = note.dataset.tooltip || '';
+    summaryTooltipEl.classList.add('is-visible');
+    const r = note.getBoundingClientRect();
+    const tipH = summaryTooltipEl.offsetHeight || 80;
+    const tipW = summaryTooltipEl.offsetWidth  || 240;
+    // Prefer to the right of the icon, fall back to left if it would
+    // overflow the viewport. Vertically clamped to the visible area.
+    let x = r.right + 10;
+    if (x + tipW > window.innerWidth - 8) x = Math.max(8, r.left - tipW - 10);
+    let y = r.top + r.height / 2 - tipH / 2;
+    y = Math.max(8, Math.min(y, window.innerHeight - tipH - 8));
+    summaryTooltipEl.style.left = x + 'px';
+    summaryTooltipEl.style.top  = y + 'px';
+  });
+  sidebar.addEventListener('mouseout', (e) => {
+    const note = e.target.closest('.methodology-note[data-tooltip]');
+    if (!note) return;
+    if (e.relatedTarget && note.contains(e.relatedTarget)) return;
+    summaryTooltipEl.classList.remove('is-visible');
   });
 }
 

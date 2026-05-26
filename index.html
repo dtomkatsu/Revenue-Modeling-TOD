@@ -40,7 +40,7 @@
     <label class="check toggle-rail">
       <input type="checkbox" id="chk-rail-cip">
       <span>Include rail CIP in cost
-        <span class="methodology-note" title="HART rail capital (~$9.1B total program) annualized over 30 years and distributed uniformly across all corridor parcels by acreage. Methodology pending review — default OFF.">(ⓘ)</span>
+        <span class="methodology-note" data-tooltip="HART rail capital (~$9.1B total program) annualized over 30 years and distributed uniformly across all corridor parcels by acreage. Methodology pending review — default OFF.">(ⓘ)</span>
       </span>
     </label>
     <label class="check toggle-all-parcels">
@@ -51,7 +51,7 @@
 
   <section class="control">
     <div class="walk-dist-head">
-      <label for="walk-dist-slider">TOD scope <span class="methodology-note" title="Show parcels within this walking distance of any station, plus all parcels in adopted TOD districts.">(ⓘ)</span></label>
+      <label for="walk-dist-slider">TOD scope <span class="methodology-note" data-tooltip="Show parcels within this walking distance of any station, plus all parcels in adopted TOD districts.">(ⓘ)</span></label>
       <span class="walk-dist-val" id="walk-dist-val">1.5 mi</span>
     </div>
     <input type="range" id="walk-dist-slider" class="slider walk-dist-slider"
@@ -187,6 +187,6 @@
 <script src="https://cdn.jsdelivr.net/npm/pmtiles@3.0.7/dist/pmtiles.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/deck.gl@9.0.32/dist.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@deck.gl/mapbox@9.0.32/dist.min.js"></script>
-<script src="script.js?v=14"></script>
+<script src="script.js?v=15"></script>
 </body>
 </html>
