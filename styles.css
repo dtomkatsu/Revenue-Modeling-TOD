@@ -1510,19 +1510,21 @@ body.sidebar-collapsed .search-box {
 
 .map-narrative-card {
   position: absolute;
-  /* Centered horizontally on the MAP AREA (right of the sidebar), and
-     vertically centered on the viewport. The old top:54% anchored the
-     card's TOP EDGE just below center, which pushed the bottom past the
-     fold on short screens once the verdict was promoted to the body —
-     same cutoff the intro card hit before it was centered. */
-  top: 50%;
+  /* Anchored to the BOTTOM of the map area, horizontally centered on the
+     map (right of the sidebar). Bottom-anchoring sidesteps two problems
+     the previous top-based positioning hit: at top:54% the card extended
+     past the viewport on short screens; at top:50% centered it covered
+     the station chip (which the camera flies into the upper half of the
+     viewport under the default pitch). Bottom-anchored, the card always
+     sits below the chip with a 24px safety margin, and a max-height +
+     overflow guarantees it can never clip past the viewport. */
+  top: auto;
+  bottom: 24px;
   left: calc((100vw + var(--sidebar-w)) / 2);
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   width: 460px;
   max-width: min(460px, calc(100vw - var(--sidebar-w) - 40px));
-  /* Belt-and-suspenders: if a future content change pushes the card
-     past the viewport height, scroll internally rather than clip. */
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 48px);
   overflow-y: auto;
   /* Editorial palette: warm dark charcoal instead of the saturated navy +
      neon-cyan that gave the old card a "control panel" feel. Borders use
@@ -1746,10 +1748,12 @@ body.sidebar-collapsed .map-narrative-card {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55),
               0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   color: var(--text);
-  /* Vertically center the (taller) intro card on the viewport — the
-     station-narrative default of top:54% would push the bottom (with the
-     "Start the journey" button) below the fold on shorter screens. */
+  /* Vertically CENTER the (taller) intro card on the viewport instead
+     of the station-card default (bottom-anchored). Must explicitly reset
+     `bottom: auto` to override the base card's `bottom: 24px`, otherwise
+     setting both top + bottom would stretch the card vertically. */
   top: 50%;
+  bottom: auto;
   transform: translate(-50%, -50%);
 }
 body.sidebar-collapsed .map-narrative-card.intro-mode {
