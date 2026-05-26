@@ -2071,13 +2071,13 @@ function renderNarrative() {
   } else if (totals.totalNet >= 0) {
     verdictEl.innerHTML = `
       <span class="verdict-headline">Pays for itself.</span>
-      <span class="verdict-detail">Brings in ${fmtUSDk(totals.totalNet)} more than it costs each year.</span>
+      <span class="verdict-detail">Brings in <span class="verdict-amount">${fmtUSDk(totals.totalNet)}</span> more than it costs each year.</span>
     `;
     verdictEl.className = 'map-narrative-verdict breaks-even';
   } else {
     verdictEl.innerHTML = `
-      <span class="verdict-headline">Runs at a loss.</span>
-      <span class="verdict-detail">Costs ${fmtUSDk(Math.abs(totals.totalNet))} more than it brings in each year.</span>
+      <span class="verdict-headline">Neighborhood runs at a loss.</span>
+      <span class="verdict-detail">Costs <span class="verdict-amount">${fmtUSDk(Math.abs(totals.totalNet))}</span> more than it brings in each year.</span>
     `;
     verdictEl.className = 'map-narrative-verdict net-loss';
   }

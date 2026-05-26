@@ -1719,6 +1719,32 @@ body.sidebar-collapsed .map-narrative-card {
 }
 .map-narrative-verdict:empty { display: none; }
 
+/* Inline number badge inside the verdict detail line. Picks up the
+   verdict's color tone (green / red) at low opacity for the background
+   so the figure pops without redirecting the eye away from the
+   headline. */
+.verdict-amount {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  /* Vertical alignment nudge so the badge sits centered on the text
+     baseline rather than dragging the line height. */
+  line-height: 1.25;
+}
+.map-narrative-verdict.breaks-even .verdict-amount {
+  background: rgba(134, 217, 168, 0.14);
+  color: #9fe2bb;
+  border: 1px solid rgba(134, 217, 168, 0.32);
+}
+.map-narrative-verdict.net-loss .verdict-amount {
+  background: rgba(242, 148, 148, 0.14);
+  color: #f5a8a8;
+  border: 1px solid rgba(242, 148, 148, 0.32);
+}
+
 /* ============================================================
    Intro card — shown once on first load (or until dismissed).
    Toggled by the .intro-mode class on the card, set/removed in
