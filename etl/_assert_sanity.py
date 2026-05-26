@@ -249,6 +249,11 @@ _REQUIRED_PROPS = (
     "frontage_road_ft", "frontage_sewer_ft", "frontage_water_ft",
     "station_ids", "address", "land_use", "assessed_value", "landlocked",
 )
+# walk_dist_ft + in_tod_area gate the frontend's TOD scope slider, but a
+# handful of parcels (~2/19,872) are legitimately unreachable on the road
+# network and have walk_dist_ft=null. The strict "must be present on every
+# parcel" check is wrong for them — instead see _assert_walk_dist_coverage
+# and _assert_in_tod_area_present for the right semantic checks.
 
 _NUMERIC_PROPS  = ("cost_per_ac", "cip_per_ac", "cost_om_per_ac",
                    "rev_per_ac", "net_per_ac")
@@ -423,6 +428,56 @@ def _assert_required_props() -> tuple[Status, str]:
     return _ok(f"all {len(_REQUIRED_PROPS)} required properties present on every feature")
 
 
+def _assert_walk_dist_coverage() -> tuple[Status, str]:
+    """walk_dist_ft must be a finite number on ≥ 99% of parcels.
+
+    The frontend's TOD scope slider filters by walk_dist_ft > walkMaxFt;
+    if the field is null on every parcel the slider silently no-ops. This
+    has been the failure mode twice — once when the column was dropped
+    during step 06/07 regeneration. A coverage assertion catches both the
+    "missing column" and "column there but all-null" variants.
+    """
+    feats = _load_parcels()
+    if feats is None:
+        return _skip(f"{PARCELS_TOD.relative_to(_ROOT)} missing")
+    n_with = sum(
+        1 for f in feats
+        if not _is_corrupted_number(f["properties"].get("walk_dist_ft"))
+        and f["properties"].get("walk_dist_ft") is not None
+    )
+    share = n_with / len(feats) if feats else 0.0
+    if share < 0.99:
+        return _bad(
+            f"only {n_with:,}/{len(feats):,} = {share:.1%} of parcels have "
+            "non-null walk_dist_ft (< 99% — TOD scope slider will not work)"
+        )
+    return _ok(f"walk_dist_ft populated on {n_with:,}/{len(feats):,} = {share:.1%}")
+
+
+def _assert_in_tod_area_present() -> tuple[Status, str]:
+    """in_tod_area must be a real boolean (not all-None) on every parcel.
+
+    Sister assertion to walk_dist_ft coverage. If every parcel has
+    in_tod_area=False (or it's missing), the frontend still works but
+    falls back to walk_dist-only scoping — which won't surface adopted
+    TOD Special Districts as "always visible." Flag if the count of True
+    values is zero, which is the unrecoverable state.
+    """
+    feats = _load_parcels()
+    if feats is None:
+        return _skip(f"{PARCELS_TOD.relative_to(_ROOT)} missing")
+    has_field = sum(1 for f in feats if "in_tod_area" in f["properties"])
+    n_true    = sum(1 for f in feats if f["properties"].get("in_tod_area") is True)
+    if has_field == 0:
+        return _bad("in_tod_area absent on every parcel")
+    if n_true == 0:
+        return _bad(
+            f"in_tod_area=True on 0 parcels (expected ~1,000 — likely a "
+            "pipeline regression dropping the join)"
+        )
+    return _ok(f"in_tod_area=True on {n_true:,} parcels")
+
+
 def _assert_assessed_value_coverage() -> tuple[Status, str]:
     feats = _load_parcels()
     if feats is None:
@@ -530,6 +585,8 @@ _ASSERTIONS: list[tuple[str, Assertion]] = [
     ("revenue_coverage",          _assert_revenue_coverage),
     ("required_props",            _assert_required_props),
     ("assessed_value_coverage",   _assert_assessed_value_coverage),
+    ("walk_dist_coverage",        _assert_walk_dist_coverage),
+    ("in_tod_area_present",       _assert_in_tod_area_present),
     ("budget_reconciliation",     _assert_budget_reconciliation),
 ]
 

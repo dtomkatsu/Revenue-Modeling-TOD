@@ -59,6 +59,11 @@ SCRIPT_NAME = "etl/08_emit_frontend_data.py"
 
 REVENUE_PATH   = _ROOT / "data" / "processed" / "parcels_revenue.geojson"
 COSTS_PATH     = _ROOT / "data" / "processed" / "parcels_costs.geojson"
+# Canonical source for walk_dist_ft, in_tod_area, nearest_station_id. We
+# re-join from here at emit time so a regen of step 06/07 that accidentally
+# drops these columns can't silently break the frontend's TOD scope slider
+# (this happened twice — see git log fix(data): re-patch walk_dist_ft).
+WALKSHEDS_PATH = _ROOT / "data" / "processed" / "parcels_in_walksheds.geojson"
 STATIONS_PATH  = _ROOT / "data" / "raw"       / "rail_transit_station_points.geojson"
 ADDRESSES_PATH = _ROOT / "data" / "raw"       / "address_points.geojson"
 GUIDEWAY_PATH  = _ROOT / "data" / "raw"       / "rail_transit_guideway_alignment_line.geojson"
@@ -305,6 +310,62 @@ def emit_frontend(*, force: bool) -> int:
 
     merged["station_id"] = merged["STATION_ID"].astype(int)
     merged["net_per_ac"] = merged["rev_per_ac"] - merged["cost_per_ac"]
+
+    # ---- Walk distance + TOD-area safety-net join -----------------------
+    # The frontend's TOD scope slider reads walk_dist_ft and in_tod_area
+    # from each parcel. These fields originate in steps 05 + 05b and
+    # *should* propagate through steps 06/07 untouched — but they've been
+    # dropped twice during data regenerations, breaking the slider silently
+    # (filter saw NaN, treated every parcel as in-scope). To make future
+    # regens robust, always re-join the canonical values from the upstream
+    # walksheds file here. If columns already exist in `merged` they're
+    # overwritten with identical data; if not, they're added.
+    if WALKSHEDS_PATH.exists():
+        walk_src = gpd.read_file(WALKSHEDS_PATH)
+        walk_cols = ["tmk", "walk_dist_ft", "in_tod_area", "nearest_station_id"]
+        available_walk = [c for c in walk_cols if c in walk_src.columns]
+        if "tmk" in available_walk and len(available_walk) > 1:
+            walk_attrs = (
+                pd.DataFrame(walk_src[available_walk])
+                  .dropna(subset=["tmk"])
+                  .drop_duplicates(subset="tmk", keep="first")
+            )
+            # Normalise TMKs on both sides to zero-padded 8-char strings so
+            # joins survive int/str/float drift between intermediates.
+            def _norm_tmk(s: pd.Series) -> pd.Series:
+                return (
+                    s.astype(str).str.replace(r"\D", "", regex=True)
+                     .str.zfill(8).str[-8:]
+                )
+            walk_attrs["tmk"]  = _norm_tmk(walk_attrs["tmk"])
+            merged_tmk_norm    = _norm_tmk(merged["tmk"])
+            merged = merged.assign(_tmk_norm=merged_tmk_norm).merge(
+                walk_attrs.rename(columns={"tmk": "_tmk_norm"}),
+                on="_tmk_norm",
+                how="left",
+                suffixes=("", "_canonical"),
+            )
+            # Prefer canonical values where present.
+            for c in ("walk_dist_ft", "in_tod_area", "nearest_station_id"):
+                canonical = f"{c}_canonical"
+                if canonical in merged.columns:
+                    merged[c] = merged[canonical].where(
+                        merged[canonical].notna(), merged.get(c)
+                    )
+                    merged = merged.drop(columns=[canonical])
+            merged = merged.drop(columns=["_tmk_norm"])
+            n_walk = int(merged["walk_dist_ft"].notna().sum()) if "walk_dist_ft" in merged else 0
+            n_tod  = int((merged.get("in_tod_area") == True).sum())  # noqa: E712
+            print(f"[walk]  joined walk_dist_ft ({n_walk}/{len(merged)}) + "
+                  f"in_tod_area ({n_tod} True) from "
+                  f"{WALKSHEDS_PATH.relative_to(_ROOT)}")
+        else:
+            print(f"[warn] {WALKSHEDS_PATH.name} missing expected walk columns; "
+                  f"frontend TOD scope slider may not work")
+    else:
+        print(f"[warn] {WALKSHEDS_PATH.relative_to(_ROOT)} not present; "
+              f"frontend TOD scope slider will not work. "
+              f"Run `python etl/05_join_parcels.py` then `etl/05b_walking_distances.py` first.")
 
     # Optional: add rail_cip_per_ac if step 12 has been run.
     # Constant value across all parcels; toggled on/off in the frontend.
