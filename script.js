@@ -57,10 +57,11 @@ const STATE = {
   extrude: true,
   stationId: '',
   showAllParcels: false,
-  // First-load intro card: shown until the user clicks "Start the journey",
-  // clicks anywhere on the map, or picks a station. Persisted in
-  // localStorage so returning users skip straight to the station tour.
-  introMode: localStorage.getItem('tod-intro-seen') !== '1',
+  // Intro card: shown on every page load until the user clicks "Start the
+  // journey", clicks anywhere on the map, or picks a station. NOT persisted
+  // across reloads — the intro explains the project and we want it visible
+  // to every visitor (including returning users on hard refresh).
+  introMode: true,
   parcels: null,        // raw FeatureCollection
   stations: null,
   stationsByWest: [],   // stations sorted longitude-ASC for the guided tour
@@ -888,22 +889,25 @@ function wireUI() {
   const card = document.getElementById('map-narrative-card');
   const closeBtn = document.getElementById('map-narrative-close');
   if (card) {
-    // Apply / clear the intro-mode class based on STATE.introMode (already
-    // initialised from localStorage). HTML defaults to .intro-mode on; if
-    // the user has already seen it, strip the class so the station body
-    // renders immediately.
+    // Apply / clear the intro-mode class based on STATE.introMode. HTML
+    // defaults to .intro-mode on; if intro is off (e.g. future state
+    // change), strip the class so the station body renders.
     if (!STATE.introMode) card.classList.remove('intro-mode');
-    if (localStorage.getItem('tod-narrative-dismissed') === '1') {
+    // Honor a previous dismiss only when we're past the intro — the intro
+    // is project framing that every visitor should see, so on reload we
+    // always show it regardless of an old dismiss flag.
+    if (!STATE.introMode &&
+        localStorage.getItem('tod-narrative-dismissed') === '1') {
       card.hidden = true;
     }
   }
   if (closeBtn) {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Closing the intro counts as "seen" so it doesn't reappear next visit.
+      // Closing the intro just dismisses for this session — the intro
+      // shows again on next page load so every visitor sees the framing.
       if (STATE.introMode) {
         STATE.introMode = false;
-        localStorage.setItem('tod-intro-seen', '1');
         card.classList.remove('intro-mode');
       }
       card.hidden = true;
@@ -1967,7 +1971,6 @@ function buildStatsHTML(totals) {
 function exitIntroMode() {
   if (!STATE.introMode) return;
   STATE.introMode = false;
-  localStorage.setItem('tod-intro-seen', '1');
   const card = document.getElementById('map-narrative-card');
   if (card) {
     card.classList.remove('intro-mode');
