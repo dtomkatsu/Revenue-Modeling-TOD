@@ -1511,15 +1511,19 @@ body.sidebar-collapsed .search-box {
 .map-narrative-card {
   position: absolute;
   /* Centered horizontally on the MAP AREA (right of the sidebar), and
-     positioned just below screen vertical center — that's where the active
-     station chip lands when stepTour flies the camera to it. Mirrors the
-     .search-box centering pattern so the same sidebar-collapse override
-     keeps it aligned. */
-  top: 54%;
+     vertically centered on the viewport. The old top:54% anchored the
+     card's TOP EDGE just below center, which pushed the bottom past the
+     fold on short screens once the verdict was promoted to the body —
+     same cutoff the intro card hit before it was centered. */
+  top: 50%;
   left: calc((100vw + var(--sidebar-w)) / 2);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   width: 460px;
   max-width: min(460px, calc(100vw - var(--sidebar-w) - 40px));
+  /* Belt-and-suspenders: if a future content change pushes the card
+     past the viewport height, scroll internally rather than clip. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   /* Editorial palette: warm dark charcoal instead of the saturated navy +
      neon-cyan that gave the old card a "control panel" feel. Borders use
      the brand teal at low opacity. */

@@ -2062,20 +2062,22 @@ function renderNarrative() {
   // Hero verdict: a journalistic headline + a one-line detail, instead
   // of the old centered ALL-CAPS pill. The .map-narrative-verdict block
   // sits at the top of the body now (re-ordered in index.html) so the
-  // punchline lands before the supporting prose.
+  // punchline lands before the supporting prose. Headlines are short
+  // declarative verb phrases ("Pays for itself." / "Runs at a loss.")
+  // with parallel detail lines for rhythm.
   if (totals.parcels === 0) {
     verdictEl.innerHTML = '<span class="verdict-headline">No parcels match the current filter.</span>';
     verdictEl.className = 'map-narrative-verdict empty';
   } else if (totals.totalNet >= 0) {
     verdictEl.innerHTML = `
       <span class="verdict-headline">Pays for itself.</span>
-      <span class="verdict-detail">${fmtUSDk(totals.totalNet)} more than it costs each year</span>
+      <span class="verdict-detail">Brings in ${fmtUSDk(totals.totalNet)} more than it costs each year.</span>
     `;
     verdictEl.className = 'map-narrative-verdict breaks-even';
   } else {
     verdictEl.innerHTML = `
-      <span class="verdict-headline">Doesn't pay for itself.</span>
-      <span class="verdict-detail">${fmtUSDk(Math.abs(totals.totalNet))} shortfall each year</span>
+      <span class="verdict-headline">Runs at a loss.</span>
+      <span class="verdict-detail">Costs ${fmtUSDk(Math.abs(totals.totalNet))} more than it brings in each year.</span>
     `;
     verdictEl.className = 'map-narrative-verdict net-loss';
   }
