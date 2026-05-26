@@ -1520,19 +1520,22 @@ body.sidebar-collapsed .search-box {
   transform: translateX(-50%);
   width: 460px;
   max-width: min(460px, calc(100vw - var(--sidebar-w) - 40px));
-  background: rgba(8, 47, 73, 0.93);
+  /* Editorial palette: warm dark charcoal instead of the saturated navy +
+     neon-cyan that gave the old card a "control panel" feel. Borders use
+     the brand teal at low opacity. */
+  background: rgba(34, 44, 52, 0.94);
   -webkit-backdrop-filter: blur(12px) saturate(140%);
   backdrop-filter: blur(12px) saturate(140%);
-  border: 1px solid rgba(0, 210, 240, 0.45);
-  border-left: 3px solid #00d2f0;                  /* cyan accent rail */
+  border: 1px solid rgba(107, 158, 120, 0.28);
+  border-left: 3px solid var(--c-teal);
   border-radius: 8px;
-  padding: 12px 14px 14px 14px;
+  padding: 14px 16px 16px 16px;
   z-index: 10;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  color: #e0f7ff;
+  gap: 12px;
+  color: var(--c-ash);
 }
 
 body.sidebar-collapsed .map-narrative-card {
@@ -1553,30 +1556,31 @@ body.sidebar-collapsed .map-narrative-card {
   min-width: 0;
 }
 .map-narrative-name {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
-  color: #e0f7ff;
+  color: var(--c-white);
   letter-spacing: 0.01em;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Counter: sentence-case slate gray instead of ALL-CAPS neon cyan — reads
+   as a byline ("Station 5 of 17") rather than a system label. */
 .map-narrative-counter {
-  font-size: 11px;
-  color: #67e8f9;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-top: 2px;
+  font-size: 12px;
+  color: var(--c-ash);
+  opacity: 0.6;
+  margin-top: 3px;
 }
 
 .map-narrative-close {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 210, 240, 0.35);
-  background: rgba(0, 30, 50, 0.55);
-  color: rgba(224, 247, 255, 0.85);
+  border: 1px solid rgba(107, 158, 120, 0.30);
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(202, 210, 197, 0.85);
   cursor: pointer;
   flex-shrink: 0;
   display: inline-flex;
@@ -1600,86 +1604,112 @@ body.sidebar-collapsed .map-narrative-card {
 .map-narrative-close::before { transform: translate(-50%, -50%) rotate(45deg); }
 .map-narrative-close::after  { transform: translate(-50%, -50%) rotate(-45deg); }
 .map-narrative-close:hover {
-  background: rgba(0, 210, 240, 0.18);
-  border-color: rgba(0, 210, 240, 0.65);
-  color: #ffffff;
+  background: rgba(107, 158, 120, 0.20);
+  border-color: rgba(107, 158, 120, 0.60);
+  color: var(--c-white);
 }
 .map-narrative-close:active { transform: scale(0.92); }
 .map-narrative-close:focus-visible {
-  outline: 2px solid rgba(0, 210, 240, 0.8);
+  outline: 2px solid rgba(107, 158, 120, 0.75);
   outline-offset: 2px;
 }
 
 .map-narrative-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .map-narrative-prose {
-  font-size: 13px;
-  line-height: 1.45;
-  color: #e2e8f0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--c-ash);
   margin: 0;
 }
 
+/* Theme stays as a pull-quote callout — but now in brand teal, not cyan. */
 .map-narrative-theme {
-  font-size: 12px;
+  font-size: 12.5px;
   font-style: italic;
-  color: #94a3b8;
+  color: rgba(202, 210, 197, 0.72);
   margin: 0;
-  padding: 8px 0 0 10px;
-  border-left: 2px solid rgba(0, 210, 240, 0.35);
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid rgba(107, 158, 120, 0.55);
+  line-height: 1.45;
 }
+.map-narrative-theme:empty { display: none; }
 
+/* Stats grid: sentence-case labels, no caps, a touch more breathing room.
+   Reads as a small data table under the verdict + prose, not a dashboard. */
 .map-narrative-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px 12px;
-  margin-top: 2px;
+  gap: 10px 16px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(202, 210, 197, 0.08);
 }
+/* Hide the grid entirely (and its separator border) in "All stations"
+   mode, where statsEl.innerHTML is cleared. Otherwise the empty grid
+   leaves an orphan hairline under the prose. */
+.map-narrative-stats:empty { display: none; }
 .narrative-stat {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   font-size: 11px;
 }
 .narrative-stat .k {
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 10px;
+  color: rgba(202, 210, 197, 0.62);
+  font-size: 11px;
+  font-weight: 500;
 }
 .narrative-stat .v {
-  color: #e0f7ff;
+  color: var(--c-white);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.narrative-stat .u {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(202, 210, 197, 0.55);
+  margin-left: 3px;
+  letter-spacing: 0;
 }
 
+/* Hero verdict: a journalistic headline at the top of the card, not a
+   centered ALL-CAPS status pill. Color (green / red / muted) carries the
+   meaning; the headline weight + a thin top accent rail give the block
+   presence without the dashboard-badge feel. */
 .map-narrative-verdict {
-  margin-top: 4px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 12.5px;
+  margin: 0;
+  padding: 4px 0 12px 0;
+  border-bottom: 1px solid rgba(202, 210, 197, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+}
+.map-narrative-verdict .verdict-headline {
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-align: center;
-  text-transform: uppercase;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
 }
-.map-narrative-verdict.breaks-even {
-  background: rgba(16, 185, 129, 0.18);
-  border: 1px solid rgba(16, 185, 129, 0.55);
-  color: #6ee7b7;
+.map-narrative-verdict .verdict-detail {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(202, 210, 197, 0.72);
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
-.map-narrative-verdict.net-loss {
-  background: rgba(239, 68, 68, 0.16);
-  border: 1px solid rgba(239, 68, 68, 0.55);
-  color: #fca5a5;
-}
-.map-narrative-verdict.empty {
-  background: rgba(100, 116, 139, 0.18);
-  border: 1px solid rgba(100, 116, 139, 0.45);
-  color: #94a3b8;
+.map-narrative-verdict.breaks-even .verdict-headline { color: #86d9a8; }
+.map-narrative-verdict.net-loss .verdict-headline    { color: #f29494; }
+.map-narrative-verdict.empty .verdict-headline {
+  color: rgba(202, 210, 197, 0.65);
+  font-weight: 600;
+  font-size: 14px;
 }
 .map-narrative-verdict:empty { display: none; }
 
