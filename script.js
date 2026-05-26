@@ -222,7 +222,7 @@ map.once('style.load', async () => {
       fetchJSON('data/parcels_tod.geojson'),
       fetchJSON('data/stations.geojson'),
       fetchJSON('data/rail_line.geojson'),
-      fetchJSON('data/raw/rail_transit_guideway_alignment_line.geojson'),
+      fetchJSON('data/rail_guideway.geojson'),
       fetchJSON('data/station_narratives.json'),
     ]);
     STATE.parcels = parcels;
