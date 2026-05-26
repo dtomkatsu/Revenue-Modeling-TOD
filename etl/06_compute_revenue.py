@@ -232,11 +232,56 @@ def compute_revenue(*, force: bool) -> int:
     # --- 3. Compute annual_property_tax --------------------------------------
     method: str
     fallback_unmatched_classes: list[str] = []
+    # Counts how many parcels got the "direct tax = $0 → fall back to
+    # estimated tax = AV × millage" rescue described below. Surfaced in
+    # the manifest for traceability.
+    n_zero_fallback_applied = 0
 
     if tax_col is not None:
         print(f"[tax]  using direct tax field: {tax_col!r}")
         parcels["annual_property_tax"] = _coerce_number(parcels[tax_col])
         method = f"direct:{tax_col}"
+
+        # ── Direct-zero rescue ──────────────────────────────────────────────
+        # The RPAD bulk roll occasionally has "Total Net Tax" = $0 for parcels
+        # that should not be exempt — most visibly for newly built homes in
+        # the Hoʻopili / Mehana / Kapolei / Waipahu master-planned
+        # communities (TMK prefixes 91x / 94x). Diagnostic showed ~2,057
+        # residential + industrial + commercial parcels with AV > $50k and
+        # a non-zero class millage rate falling into this bucket — far
+        # more than the ~109 parcels that are genuinely tax-exempt
+        # (Public Service @ 0.00 millage + Preservation conservation land).
+        #
+        # When direct_tax == 0 BUT AV > $50k AND the class's FY26 millage
+        # is > 0, fall back to value × millage / 1000 as the estimate.
+        # Parcels in classes whose millage IS 0 (Public Service) keep
+        # their legitimate $0. Parcels with tiny AV (< $50k) also keep $0
+        # — they're more likely actual exemptions than data drops.
+        if value_col is not None and class_col is not None:
+            FALLBACK_AV_THRESHOLD = 50_000
+            fb_values  = _coerce_number(parcels[value_col])
+            fb_classes = parcels[class_col].map(_normalize_class)
+            fb_rates   = fb_classes.map(FY26_MILLAGE_RATES_PER_1000)
+            zero_mask = (
+                (parcels["annual_property_tax"] == 0)
+                & fb_values.gt(FALLBACK_AV_THRESHOLD)
+                & fb_rates.gt(0)
+            )
+            if zero_mask.any():
+                estimate = fb_values * fb_rates / 1000.0
+                parcels.loc[zero_mask, "annual_property_tax"] = estimate[zero_mask]
+                n_zero_fallback_applied = int(zero_mask.sum())
+                print(
+                    f"[tax]  direct-zero rescue: replaced $0 with value×millage "
+                    f"estimate on {n_zero_fallback_applied} parcels "
+                    f"(AV > ${FALLBACK_AV_THRESHOLD:,}, class millage > 0)"
+                )
+                method = f"direct:{tax_col} + {n_zero_fallback_applied} zero-fallback"
+        else:
+            print(
+                "[tax]  warn: direct-zero rescue skipped — no value_col / "
+                "class_col available to compute the fallback estimate"
+            )
     elif value_col is not None:
         if class_col is None:
             raise ValueError(
@@ -296,6 +341,7 @@ def compute_revenue(*, force: bool) -> int:
             "rows_with_rev_per_ac":   n_with_revpa,
             "median_rev_per_ac":      median_revpa,
             "fallback_unmatched_classes": fallback_unmatched_classes,
+            "direct_zero_fallback_count": n_zero_fallback_applied,
         },
     )
 

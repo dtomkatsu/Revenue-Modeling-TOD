@@ -39,11 +39,17 @@ Parcels (``data/parcels_tod.geojson``):
     land_use class).
   * All cost_*_per_ac ≥ 0
   * p99(cost_per_ac) ≤ 100 × p50(cost_per_ac)
-  * ≥ 85% of non-landlocked parcels have positive rev_per_ac (current
-    baseline: 90.3%. The remainder are mostly Residential parcels whose
-    homeowner exemption zeros out the taxable value — real RPAD
-    behavior, not a pipeline bug. The 85% floor catches a real regression
-    while accepting the documented baseline.)
+  * ≥ 95% of non-landlocked parcels have positive rev_per_ac. Prior
+    baseline was 90.3% but ~10% of parcels were falling to $0 because
+    the RPAD bulk roll's "Total Net Tax" column is occasionally $0
+    for newly built homes in master-planned communities
+    (Hoʻopili / Mehana / Kapolei / Waipahu — TMK prefixes 91x / 94x)
+    where the source data hadn't picked up the new build's tax cycle
+    yet. step 06's direct-zero rescue (AV > $50k + class millage > 0
+    → fall back to value × millage estimate) lifts the baseline to
+    ≥98%. The remaining <2% are legitimately exempt: Public Service
+    @ 0.00 millage and a small set of low-AV residentials whose
+    homestead-exemption math actually nets to zero.
   * Every required property present on every feature
   * ≥ 80% of parcels have non-null assessed_value
 
@@ -401,14 +407,16 @@ def _assert_revenue_coverage() -> tuple[Status, str]:
         if _is_positive(f["properties"].get("rev_per_ac"))
     )
     share = n_with_rev / len(non_landlocked)
-    # Baseline 90.3%. Lower bound 85% catches real regression while
-    # accepting the documented homeowner-exemption baseline.
-    if share < 0.85:
+    # New baseline ~98% (post direct-zero rescue in step 06). Lower
+    # bound 95% catches a real regression — if the rescue stops firing
+    # for any reason, the share will collapse back toward 90% and trip
+    # this. See the module docstring for the full story.
+    if share < 0.95:
         return _bad(
             f"only {n_with_rev:,}/{len(non_landlocked):,} = {share:.1%} of "
-            "non-landlocked parcels have positive rev_per_ac (< 85%)"
+            "non-landlocked parcels have positive rev_per_ac (< 95%)"
         )
-    return _ok(f"{n_with_rev:,}/{len(non_landlocked):,} = {share:.1%} ≥ 85%")
+    return _ok(f"{n_with_rev:,}/{len(non_landlocked):,} = {share:.1%} ≥ 95%")
 
 
 def _assert_required_props() -> tuple[Status, str]:
