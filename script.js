@@ -1955,13 +1955,18 @@ function buildStatsHTML(totals) {
     const [bucket, value] = buckets[0];
     const pct = Math.round((value / totals.totalRev) * 100);
     const label = bucket === 'PublicService' ? 'Public Service' : bucket;
-    dominant = `${label} · ${pct}%`;
+    // Sentence-case + parenthetical share reads more like a news graphic
+    // than the previous "Industrial · 41%" dot-separator format.
+    dominant = `${label} (${pct}%)`;
   }
+  // Units are bound to the value (small "/yr" suffix) instead of crammed
+  // into the label as "Revenue / yr" — keeps the label a clean noun.
+  const unit = '<span class="u">/yr</span>';
   return `
     <div class="narrative-stat"><span class="k">Parcels</span><span class="v">${fmtInt.format(totals.parcels)}</span></div>
-    <div class="narrative-stat"><span class="k">Dominant use</span><span class="v">${escapeHTML(dominant)}</span></div>
-    <div class="narrative-stat"><span class="k">Revenue / yr</span><span class="v">${fmtUSDk(totals.totalRev)}</span></div>
-    <div class="narrative-stat"><span class="k">Cost / yr</span><span class="v">${fmtUSDk(totals.totalCost)}</span></div>
+    <div class="narrative-stat"><span class="k">Top use</span><span class="v">${escapeHTML(dominant)}</span></div>
+    <div class="narrative-stat"><span class="k">Revenue</span><span class="v">${fmtUSDk(totals.totalRev)}${unit}</span></div>
+    <div class="narrative-stat"><span class="k">Cost</span><span class="v">${fmtUSDk(totals.totalCost)}${unit}</span></div>
   `;
 }
 
@@ -2034,7 +2039,7 @@ function renderNarrative() {
     proseEl.textContent = 'Showing the entire Skyline corridor. Pick a station from the dropdown to start the guided west-to-east tour.';
     themeEl.textContent = '';
     statsEl.innerHTML = '';
-    verdictEl.textContent = '';
+    verdictEl.innerHTML = '';
     verdictEl.className = 'map-narrative-verdict';
     chipRefs.forEach((el) => el.classList.remove('active'));
     return;
@@ -2054,14 +2059,26 @@ function renderNarrative() {
   const totals = computeFilteredTotals();
   statsEl.innerHTML = buildStatsHTML(totals);
 
+  // Hero verdict: a journalistic headline + a one-line detail, instead
+  // of the old centered ALL-CAPS pill. The .map-narrative-verdict block
+  // sits at the top of the body now (re-ordered in index.html) so the
+  // punchline lands before the supporting prose. Headlines are short
+  // declarative verb phrases ("Pays for itself." / "Runs at a loss.")
+  // with parallel detail lines for rhythm.
   if (totals.parcels === 0) {
-    verdictEl.textContent = 'No parcels in current filter';
+    verdictEl.innerHTML = '<span class="verdict-headline">No parcels match the current filter.</span>';
     verdictEl.className = 'map-narrative-verdict empty';
   } else if (totals.totalNet >= 0) {
-    verdictEl.textContent = `Breaks even · +${fmtUSDk(totals.totalNet)} / yr`;
+    verdictEl.innerHTML = `
+      <span class="verdict-headline">Pays for itself.</span>
+      <span class="verdict-detail">Brings in <span class="verdict-amount">${fmtUSDk(totals.totalNet)}</span> more than it costs each year.</span>
+    `;
     verdictEl.className = 'map-narrative-verdict breaks-even';
   } else {
-    verdictEl.textContent = `Net loss · ${fmtUSDk(totals.totalNet)} / yr`;
+    verdictEl.innerHTML = `
+      <span class="verdict-headline">Neighborhood runs at a loss.</span>
+      <span class="verdict-detail">Costs <span class="verdict-amount">${fmtUSDk(Math.abs(totals.totalNet))}</span> more than it brings in each year.</span>
+    `;
     verdictEl.className = 'map-narrative-verdict net-loss';
   }
 
