@@ -57,6 +57,10 @@ const STATE = {
   extrude: true,
   stationId: '',
   showAllParcels: false,
+  // First-load intro card: shown until the user clicks "Start the journey",
+  // clicks anywhere on the map, or picks a station. Persisted in
+  // localStorage so returning users skip straight to the station tour.
+  introMode: localStorage.getItem('tod-intro-seen') !== '1',
   parcels: null,        // raw FeatureCollection
   stations: null,
   stationsByWest: [],   // stations sorted longitude-ASC for the guided tour
@@ -248,20 +252,11 @@ map.once('style.load', async () => {
     addLayers();
     wireUI();
     refresh();
-    // Tessellate Oahu basemap tiles into the in-memory cache while the map
-    // is still hidden (opacity 0 in CSS). Camera moves between zooms are
-    // invisible to the user; only the cache fills.
-    await prewarmOahuTiles();
-    // querySourceFeatures only sees features in CURRENTLY-loaded tiles. We
-    // just walked the camera over Oahu z8–z11 in prewarm, so the place
-    // tiles for the whole island are loaded — perfect time to harvest
-    // suburb/neighbourhood centroids for the area badges.
-    addAreaBadges();
-    // Rail guideway on a non-interleaved overlay — separate transparent canvas
-    // composited above MapLibre, so it's never depth-tested against parcel bars.
-    // Called after prewarmOahuTiles so deck.gl's WebGL context is fully ready.
-    // MultiLineString features (segment #10) are spread into separate paths so
-    // getPath receives a flat [[lon,lat],...] array rather than nested arrays.
+
+    // Rail guideway overlay — independent of basemap tile state, render now.
+    // MultiLineString features (segment #10) are spread into separate paths
+    // so getPath receives a flat [[lon,lat],...] array rather than nested
+    // arrays.
     railPaths = STATE.railGuideway.features.flatMap(f =>
       f.geometry.type === 'MultiLineString'
         ? f.geometry.coordinates
@@ -269,11 +264,10 @@ map.once('style.load', async () => {
     );
     rebuildRailLayers();
     startPulseLoop();
-
-    // Initial narrative + camera. selectStation already ran via the default
-    // station set above (refresh path) — now compose the narrative panel
-    // and pose the camera over the westernmost station before revealing.
     renderNarrative();
+
+    // Jump the camera to the westernmost station BEFORE revealing — first
+    // paint should show the final viewport, not a corridor-wide fitBounds.
     const firstStation = STATE.stationsByWest[0];
     const firstCoords = firstStation ? firstStation.geometry.coordinates : [-157.95, 21.38];
     map.jumpTo({
@@ -282,12 +276,40 @@ map.once('style.load', async () => {
       pitch: 55,
       bearing: 0,
     });
-    // Force a deck.gl re-render after the camera jump. Without this, the
-    // parcel layer occasionally stays blank on first paint until the user
-    // interacts (clicks a tab, drags the map, etc.) — the prewarm-then-jump
-    // sequence appears to leave deck.gl's view state out of sync.
+
+    // Reveal the map as soon as the CURRENT viewport's tiles are loaded.
+    // Previously we awaited prewarmOahuTiles() (9 camera sweeps at z8–z11)
+    // before adding .ready — that blocked the user behind 4–8 s of black
+    // screen on a cold PMTiles cache. Cap the wait at 1.2 s so a slow
+    // network can't strand the user looking at a black map forever.
+    const viewportReady = (async () => {
+      while (!map.areTilesLoaded()) {
+        await new Promise(r => setTimeout(r, 30));
+      }
+    })();
+    await Promise.race([
+      viewportReady,
+      new Promise(r => setTimeout(r, 1200)),
+    ]);
     refreshLayer();
     document.getElementById('map').classList.add('ready');
+
+    // Populate area badges from currently-loaded basemap tiles (corridor
+    // viewport). As the user pans/zooms, MapLibre loads new place tiles and
+    // we re-run addAreaBadges to pick them up. The function dedupes by
+    // place name across calls, so repeat fires are cheap and idempotent.
+    //
+    // Why no prewarm? The old prewarmOahuTiles() used map.jumpTo() to walk
+    // the camera across z8–z11, which only works when the map is hidden
+    // (opacity 0). Awaiting it before reveal cost 4–8 seconds of black
+    // screen on a cold PMTiles cache — by far the biggest perceived load
+    // delay. Tiles now load on-demand instead.
+    addAreaBadges();
+    map.on('sourcedata', (e) => {
+      if (e.sourceId === 'openmaptiles' && e.isSourceLoaded) {
+        addAreaBadges();
+      }
+    });
   } catch (err) {
     console.error(err);
     document.getElementById('summary').innerHTML =
@@ -315,8 +337,10 @@ async function fetchJSON(url) {
 // a place doesn't get N stacked markers. Suburbs are rendered prominently
 // (uppercase, slate background), neighbourhoods more subdued via the
 // .area-badge.neighbourhood modifier so the visual hierarchy reads.
+// Module-scope dedup set so repeat calls (now fired on tile load) only add
+// each place once instead of stacking duplicate markers.
+const _seenPlaces = new Set();
 function addAreaBadges() {
-  const seen = new Set();
   let added = 0;
   for (const cls of ['suburb', 'neighbourhood']) {
     const features = map.querySourceFeatures('openmaptiles', {
@@ -325,11 +349,11 @@ function addAreaBadges() {
     });
     for (const f of features) {
       const name = f.properties.name_en || f.properties.name;
-      if (!name || seen.has(name)) continue;
+      if (!name || _seenPlaces.has(name)) continue;
       // Vector-tile point features have geometry.coordinates as [lng, lat].
       const coords = f.geometry?.type === 'Point' && f.geometry.coordinates;
       if (!coords) continue;
-      seen.add(name);
+      _seenPlaces.add(name);
       const el = document.createElement('div');
       el.className = cls === 'neighbourhood'
         ? 'area-badge neighbourhood'
@@ -341,7 +365,7 @@ function addAreaBadges() {
       added += 1;
     }
   }
-  console.log(`[areas] ${added} badges placed`);
+  if (added > 0) console.log(`[areas] +${added} badges (total ${_seenPlaces.size})`);
 }
 
 async function prewarmOahuTiles() {
@@ -853,6 +877,8 @@ function handleHover({ object, x, y }) {
 
 function wireUI() {
   document.getElementById('station-select').addEventListener('change', (e) => {
+    // Selecting any station dismisses the intro overlay.
+    exitIntroMode();
     selectStation(e.target.value);
   });
 
@@ -861,14 +887,52 @@ function wireUI() {
   // (handled in goToStation). State persists across reloads via localStorage.
   const card = document.getElementById('map-narrative-card');
   const closeBtn = document.getElementById('map-narrative-close');
-  if (card && localStorage.getItem('tod-narrative-dismissed') === '1') {
-    card.hidden = true;
+  if (card) {
+    // Apply / clear the intro-mode class based on STATE.introMode (already
+    // initialised from localStorage). HTML defaults to .intro-mode on; if
+    // the user has already seen it, strip the class so the station body
+    // renders immediately.
+    if (!STATE.introMode) card.classList.remove('intro-mode');
+    if (localStorage.getItem('tod-narrative-dismissed') === '1') {
+      card.hidden = true;
+    }
   }
   if (closeBtn) {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      // Closing the intro counts as "seen" so it doesn't reappear next visit.
+      if (STATE.introMode) {
+        STATE.introMode = false;
+        localStorage.setItem('tod-intro-seen', '1');
+        card.classList.remove('intro-mode');
+      }
       card.hidden = true;
       localStorage.setItem('tod-narrative-dismissed', '1');
+    });
+  }
+
+  // "Start the journey" button on the intro card.
+  const startBtn = document.getElementById('map-narrative-start');
+  if (startBtn) {
+    startBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exitIntroMode();
+    });
+  }
+
+  // Clicking anywhere on the map (parcel, basemap, blank area) also
+  // dismisses the intro — the user has clearly engaged. Registered after
+  // map exists so it doesn't no-op. Listener inside the card itself stops
+  // propagation so clicks inside the card don't accidentally dismiss
+  // (e.g. clicking the close button while still in intro mode).
+  if (typeof map !== 'undefined' && map && map.on) {
+    map.on('click', () => exitIntroMode());
+  }
+  if (card) {
+    card.addEventListener('click', (e) => {
+      // Let the start button / close button handle their own clicks; this
+      // just prevents bubbling to the map click above.
+      e.stopPropagation();
     });
   }
 
@@ -1626,9 +1690,23 @@ function renderLegend() {
   `;
 }
 
+// Returns the slice of STATE.filtered that the Summary panel and narrative
+// card should aggregate over. Normally that's just STATE.filtered, but when
+// "Show all parcels" is on we still want the station-anchored stats to
+// reflect only the selected station's TOD — the toggle changes what's
+// VISIBLE on the map, not what the chosen station's totals mean.
+function summaryScopedFeatures() {
+  if (!STATE.showAllParcels) return STATE.filtered;
+  const sid = STATE.stationId ? +STATE.stationId : null;
+  if (sid === null) return STATE.filtered;
+  return STATE.filtered.filter(
+    (f) => (f.properties?.station_ids || []).includes(sid)
+  );
+}
+
 function renderSummary() {
   const el = document.getElementById('summary');
-  const features = STATE.filtered;
+  const features = summaryScopedFeatures();
   if (!features.length) {
     el.innerHTML = `<p class="muted">No parcels for current selection.</p>`;
     return;
@@ -1832,7 +1910,10 @@ function computeFilteredTotals() {
   for (const b of Object.keys(LAND_USE_BUCKETS)) revByBucket[b] = 0;
   let revOther = 0;
 
-  for (const f of STATE.filtered) {
+  // Station-scope when "Show all parcels" is on so the narrative card's
+  // stats stay tied to the selected station (see summaryScopedFeatures).
+  const features = summaryScopedFeatures();
+  for (const f of features) {
     const p = f.properties;
     const acres = +p.area_ac;
     if (!Number.isFinite(acres)) continue;
@@ -1849,7 +1930,7 @@ function computeFilteredTotals() {
   }
 
   return {
-    parcels: STATE.filtered.length,
+    parcels: features.length,
     totalRev,
     totalCost,
     totalNet: totalRev - totalCost,
@@ -1879,6 +1960,25 @@ function buildStatsHTML(totals) {
   `;
 }
 
+// Leave the first-load intro card and reveal the station narrative body.
+// Called by: "Start the journey" button, any map click, the station-select
+// change handler, and goToStation (station chip click). Idempotent — safe
+// to call when already out of intro mode.
+function exitIntroMode() {
+  if (!STATE.introMode) return;
+  STATE.introMode = false;
+  localStorage.setItem('tod-intro-seen', '1');
+  const card = document.getElementById('map-narrative-card');
+  if (card) {
+    card.classList.remove('intro-mode');
+    // If the user previously dismissed (X) and we just exited via a chip
+    // click, ensure the card is visible too.
+    card.hidden = false;
+    localStorage.setItem('tod-narrative-dismissed', '0');
+  }
+  renderNarrative();
+}
+
 // Populate the floating map narrative card with the active station's
 // authored framing and live computed totals. Also toggles .active on the
 // map chip (which reveals the chip-attached Prev / Next buttons) and sets
@@ -1886,6 +1986,9 @@ function buildStatsHTML(totals) {
 function renderNarrative() {
   const card = document.getElementById('map-narrative-card');
   if (!card) return;
+  // While the intro card is up we leave its DOM alone — the station
+  // body is hidden anyway via the .intro-mode class.
+  if (STATE.introMode) return;
   const sortedList = STATE.stationsByWest || [];
   if (!sortedList.length) return;
 
@@ -1967,6 +2070,8 @@ function renderNarrative() {
 // click handlers (jump to any station by clicking its label).
 function goToStation(stationFeature) {
   if (!stationFeature) return;
+  // Picking any station also implicitly dismisses the intro.
+  exitIntroMode();
   const id = String(getStationId(stationFeature));
   // Clicking a chip always reopens the narrative card if the user had
   // previously dismissed it — the chip *is* the reopen affordance.

@@ -242,6 +242,11 @@ select, button, input {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--c-slate);
+  /* Don't stretch full panel width — fixed compact pill.
+     Must use `width` (not `max-width`): buttons have flex-basis:0, so
+     with max-width the container collapses to content (~100px). */
+  width: 230px;
+  align-self: flex-start;
 }
 
 .seg-btn {
@@ -299,6 +304,14 @@ select, button, input {
 .seg-btn:hover {
   background: rgba(202, 210, 197, 0.06);
   opacity: 1;
+}
+/* When any tab is active, fade the others more strongly so the selected
+   tab clearly dominates. :has() is supported in all modern browsers. */
+.seg:has(.seg-btn.active) .seg-btn:not(.active) {
+  opacity: 0.38;
+}
+.seg:has(.seg-btn.active) .seg-btn:not(.active):hover {
+  opacity: 0.7;
 }
 .seg-btn.active {
   background: var(--c-teal);
@@ -1669,6 +1682,124 @@ body.sidebar-collapsed .map-narrative-card {
   color: #94a3b8;
 }
 .map-narrative-verdict:empty { display: none; }
+
+/* ============================================================
+   Intro card — shown once on first load (or until dismissed).
+   Toggled by the .intro-mode class on the card, set/removed in
+   script.js. While .intro-mode is on, the station body hides
+   and the intro block takes over.
+   ============================================================ */
+.map-narrative-intro { display: none; }
+.map-narrative-card.intro-mode .map-narrative-body { display: none; }
+.map-narrative-card.intro-mode .map-narrative-intro {
+  display: block;
+  padding: 4px 2px 2px;
+}
+/* In intro mode the header's loading-state name/counter aren't useful —
+   the intro has its own title. Hide them so the close button still
+   floats in the top-right corner of the card. */
+.map-narrative-card.intro-mode .map-narrative-name,
+.map-narrative-card.intro-mode .map-narrative-counter { display: none; }
+.map-narrative-card.intro-mode .map-narrative-header {
+  /* Collapse header height since its content is hidden; close button
+     still positions via its absolute placement. */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* Decorative accent strip at the top — same diverging palette as the
+   legend ramp, ties the intro visually to the metric being explained. */
+.map-narrative-card.intro-mode::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #d73027 0%, #f46d43 18%, #fdae61 32%,
+                                    #fee08b 46%, #ffffbf 50%, #d9ef8b 54%,
+                                    #a6d96a 68%, #66bd63 82%, #1a9850 100%);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  opacity: 0.85;
+}
+
+.map-narrative-intro-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.map-narrative-intro-title {
+  margin: 0 0 12px 0;
+  font-size: 19px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  /* A subtle gradient on the title makes it feel "alive" without losing
+     legibility against the charcoal panel. */
+  background: linear-gradient(135deg, #ffffff 0%, #cad2c5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.map-narrative-intro-prose {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-soft);
+}
+.map-narrative-intro-prose strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.map-narrative-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: var(--c-teal);
+  color: var(--c-white);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.12s ease,
+              box-shadow 0.18s ease;
+  box-shadow: 0 2px 10px rgba(107, 158, 120, 0.25);
+}
+.map-narrative-start:hover {
+  background: #7caf89;
+  box-shadow: 0 4px 16px rgba(107, 158, 120, 0.42);
+  transform: translateY(-1px);
+}
+.map-narrative-start:active { transform: translateY(0); }
+.map-narrative-start:focus-visible {
+  outline: 2px solid var(--c-ash);
+  outline-offset: 2px;
+}
+.map-narrative-start-arrow {
+  display: inline-block;
+  transition: transform 0.18s ease;
+  font-weight: 500;
+}
+.map-narrative-start:hover .map-narrative-start-arrow {
+  transform: translateX(3px);
+}
+
+.map-narrative-intro-hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
 
 /* Active-station chip highlight on the map — brightens border, fills the
    chip background a touch, adds a cyan glow that echoes the dot pulse.

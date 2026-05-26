@@ -5,14 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Skyline Revenue vs. Cost — Honolulu</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
 <aside id="sidebar">
   <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">‹</button>
   <header>
     <h1>Skyline TOD</h1>
-    <p class="subtitle">Revenue vs. infrastructure cost per acre</p>
   </header>
 
   <section class="control">
@@ -132,7 +131,7 @@
 <!-- Floating tour card pinned to the bottom-left of the map area. Same
      content as the old sidebar narrative panel, but composited over the
      map so the viewer's eyes stay on the corridor while reading the story. -->
-<div id="map-narrative-card" class="map-narrative-card">
+<div id="map-narrative-card" class="map-narrative-card intro-mode">
   <div class="map-narrative-header">
     <div class="map-narrative-title">
       <div class="map-narrative-name muted">Loading…</div>
@@ -141,6 +140,26 @@
     <button id="map-narrative-close" class="map-narrative-close"
             aria-label="Close tour panel" title="Close (click a station to reopen)"></button>
   </div>
+
+  <!-- Intro shown on first open. Replaced by station body once the user
+       presses "Start the journey," clicks anywhere on the map, or selects
+       a station. -->
+  <div class="map-narrative-intro">
+    <div class="map-narrative-intro-eyebrow">Skyline TOD Revenue Atlas</div>
+    <h2 class="map-narrative-intro-title">How much does it cost to maintain our neighborhoods?</h2>
+    <p class="map-narrative-intro-prose">
+      Honolulu spends real money each year keeping roads, water lines, and sewer pipes flowing
+      to every parcel. <strong>Less-dense neighborhoods cost far more per acre to serve</strong>
+      than the property tax they pay back, while compact, walkable areas often cover their share
+      — and then some. Walk the Skyline corridor station by station to see who pays for whom.
+    </p>
+    <button id="map-narrative-start" class="map-narrative-start" type="button">
+      <span class="map-narrative-start-label">Start the journey</span>
+      <span class="map-narrative-start-arrow" aria-hidden="true">→</span>
+    </button>
+    <div class="map-narrative-intro-hint">…or click any station on the map</div>
+  </div>
+
   <div class="map-narrative-body">
     <p class="map-narrative-prose"></p>
     <p class="map-narrative-theme"></p>
@@ -159,12 +178,16 @@
 <div id="summary-tooltip" aria-hidden="true"></div>
 <div id="seg-tooltip" aria-hidden="true"></div>
 
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"
-        integrity="sha384-MjejsnWXHmuz93aE35YWLh5AbS/6ceRB3Vb+ukOwqFzJRTpQ8vvbkLbNV7I0QK4f"
-        crossorigin="anonymous"></script>
-<script src="https://unpkg.com/deck.gl@9.0.32/dist.min.js"></script>
-<script src="https://unpkg.com/@deck.gl/mapbox@9.0.32/dist.min.js"></script>
-<script src="script.js?v=9"></script>
+<!--
+  jsdelivr instead of unpkg: jsdelivr is fronted by Cloudflare + Fastly +
+  others, so cold-cache cost is much lower in practice. Also swapping
+  maplibre-gl.js → maplibre-gl.min.js (the .js variant is the unminified
+  dev build, ~800 KB larger). pmtiles' UMD bundle stays as-is.
+-->
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.0.7/dist/pmtiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/deck.gl@9.0.32/dist.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@deck.gl/mapbox@9.0.32/dist.min.js"></script>
+<script src="script.js?v=12"></script>
 </body>
 </html>
