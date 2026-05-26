@@ -1961,12 +1961,18 @@ function buildStatsHTML(totals) {
   }
   // Units are bound to the value (small "/yr" suffix) instead of crammed
   // into the label as "Revenue / yr" — keeps the label a clean noun.
+  // Dollar values are wrapped in .stat-amount for the inline badge
+  // treatment that echoes the verdict-detail .verdict-amount. The
+  // non-monetary values (parcel count, dominant-use percentage) are
+  // left as plain bold text — only money figures get the badge.
   const unit = '<span class="u">/yr</span>';
+  const rev  = `<span class="stat-amount">${fmtUSDk(totals.totalRev)}</span>`;
+  const cost = `<span class="stat-amount">${fmtUSDk(totals.totalCost)}</span>`;
   return `
     <div class="narrative-stat"><span class="k">Parcels</span><span class="v">${fmtInt.format(totals.parcels)}</span></div>
     <div class="narrative-stat"><span class="k">Top use</span><span class="v">${escapeHTML(dominant)}</span></div>
-    <div class="narrative-stat"><span class="k">Revenue</span><span class="v">${fmtUSDk(totals.totalRev)}${unit}</span></div>
-    <div class="narrative-stat"><span class="k">Cost</span><span class="v">${fmtUSDk(totals.totalCost)}${unit}</span></div>
+    <div class="narrative-stat"><span class="k">Revenue</span><span class="v">${rev}${unit}</span></div>
+    <div class="narrative-stat"><span class="k">Cost</span><span class="v">${cost}${unit}</span></div>
   `;
 }
 
@@ -2035,7 +2041,12 @@ function renderNarrative() {
   if (idx === -1) {
     nameEl.textContent = 'All stations';
     nameEl.classList.add('muted');
-    counterEl.textContent = `${sortedList.length} stations · full corridor`;
+    // Was "17 stations · full corridor", but now that the counter
+    // renders inline next to the name with a · separator, that text
+    // would read "All stations · 17 stations · full corridor" — both
+    // a stuttering "stations" repeat and a double · separator. Reduce
+    // to a single scope label instead.
+    counterEl.textContent = 'Full corridor';
     proseEl.textContent = 'Showing the entire Skyline corridor. Pick a station from the dropdown to start the guided west-to-east tour.';
     themeEl.textContent = '';
     statsEl.innerHTML = '';
