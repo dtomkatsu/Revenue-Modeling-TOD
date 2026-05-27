@@ -37,7 +37,7 @@ html, body {
   padding: 0;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
   background: var(--bg);
 }
@@ -169,7 +169,7 @@ body.sidebar-collapsed .sidebar-toggle {
 }
 #sidebar header h1 {
   margin: 0;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--c-white);
@@ -201,7 +201,7 @@ body.sidebar-collapsed .sidebar-toggle {
 
 .control > label,
 .control > h2 {
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -214,28 +214,6 @@ select, button, input {
   color: inherit;
 }
 
-#station-select {
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--c-slate);
-  color: var(--c-ash);
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  /* Custom dropdown caret in muted teal. */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%236B9E78' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
-  transition: border-color 0.15s, background-color 0.15s;
-}
-#station-select:hover { background-color: #3D5B5F; }
-#station-select:focus {
-  outline: none;
-  border-color: var(--c-teal);
-  box-shadow: 0 0 0 3px rgba(107, 158, 120, 0.18);
-}
 
 .seg {
   display: flex;
@@ -257,7 +235,7 @@ select, button, input {
   border: none;
   border-right: 1px solid var(--border-soft);
   cursor: pointer;
-  font-size: 13.5px;
+  font-size: 14.5px;
   color: var(--text-soft);
   opacity: 0.7;
   transition: background 0.12s, color 0.12s, opacity 0.12s;
@@ -271,7 +249,7 @@ select, button, input {
   flex: 0.85;
   /* Stretch height to match the stacked split column. */
   padding: 14px 4px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -291,7 +269,7 @@ select, button, input {
   border-right: none;
   border-bottom: 1px solid var(--border-soft);
   padding: 6px 4px 6px 10px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   text-align: left;
   /* Left accent strip tied to the diverging palette: Cost = red end,
      Revenue = green end. Makes the pair visually "halves of Net." */
@@ -391,7 +369,7 @@ select, button, input {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  font-size: 14px;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
@@ -421,7 +399,7 @@ select, button, input {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 13px;
+  font-size: 14px;
 }
 .filter-name {
   color: var(--text-soft);
@@ -431,7 +409,7 @@ select, button, input {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--c-teal);
-  font-size: 12px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 10px;
   background: rgba(107, 158, 120, 0.10);
@@ -512,7 +490,7 @@ select, button, input {
 .walk-dist-head label {
   /* Re-assert the section-label styling because we're replacing a bare label
      with a flex container holding the label and the value chip. */
-  font-size: 11.5px !important;
+  font-size: 12.5px !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.08em !important;
@@ -523,7 +501,7 @@ select, button, input {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--c-teal);
-  font-size: 12px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 10px;
   background: rgba(107, 158, 120, 0.10);
@@ -622,7 +600,7 @@ select, button, input {
   padding-bottom: 4px;
 }
 .type-filter-head .filter-name {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* "More" disclosure button below the Residential checkbox. Indented to
@@ -637,7 +615,7 @@ select, button, input {
   border: none;
   padding: 2px 0 4px 23px;
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -645,10 +623,10 @@ select, button, input {
   color: var(--c-teal);
 }
 .type-filter-toggle__label {
-  font-size: 12px;
+  font-size: 13px;
 }
 .type-filter-toggle__caret {
-  font-size: 11px;
+  font-size: 12px;
   transition: transform 0.18s ease;
   line-height: 1;
 }
@@ -665,7 +643,7 @@ select, button, input {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-soft);
   cursor: pointer;
   padding: 3px 0;
@@ -685,7 +663,7 @@ select, button, input {
   min-height: 22px;
 }
 .filter-count {
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
@@ -696,7 +674,7 @@ select, button, input {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -717,7 +695,7 @@ select, button, input {
 }
 
 .legend-title {
-  font-size: 12px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -743,7 +721,7 @@ select, button, input {
   padding: 2px 8px;
   border-radius: 10px;
   border: 1px solid;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
   text-shadow: 0 1px 3px rgba(0,0,0,0.55);
@@ -793,7 +771,7 @@ select, button, input {
 
 .summary .row .k {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12.5px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
@@ -806,7 +784,7 @@ select, button, input {
   padding: 4px 11px;
   border-radius: 14px;
   font-weight: 700;
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-variant-numeric: tabular-nums;
   color: var(--c-ash);
   background: rgba(107, 158, 120, 0.10);
@@ -949,6 +927,29 @@ select, button, input {
 /* Address search bar — anchored top-center over the map area, NOT inside
    the sidebar (so it survives sidebar collapse). Avoids collision with
    MapLibre's NavigationControl at top-right. */
+
+#station-select {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--c-slate);
+  color: var(--c-ash);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%236B9E78' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+#station-select:hover { background-color: #3D5B5F; }
+#station-select:focus {
+  outline: none;
+  border-color: var(--c-teal);
+  box-shadow: 0 0 0 3px rgba(107, 158, 120, 0.18);
+}
+
 .search-box {
   position: absolute;
   top: 14px;
@@ -1568,7 +1569,7 @@ body.sidebar-collapsed .map-narrative-card {
   align-items: baseline;
 }
 .map-narrative-name {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--c-white);
   letter-spacing: 0.01em;
@@ -1582,7 +1583,7 @@ body.sidebar-collapsed .map-narrative-card {
 /* Counter: sentence-case slate gray instead of ALL-CAPS neon cyan — reads
    as a byline ("Station 5 of 17") rather than a system label. */
 .map-narrative-counter {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--c-ash);
   opacity: 0.6;
   flex: 0 0 auto;
@@ -1642,7 +1643,7 @@ body.sidebar-collapsed .map-narrative-card {
 }
 
 .map-narrative-prose {
-  font-size: 13.5px;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--c-ash);
   margin: 0;
@@ -1650,7 +1651,7 @@ body.sidebar-collapsed .map-narrative-card {
 
 /* Theme stays as a pull-quote callout — but now in brand teal, not cyan. */
 .map-narrative-theme {
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-style: italic;
   color: rgba(202, 210, 197, 0.72);
   margin: 0;
@@ -1678,21 +1679,21 @@ body.sidebar-collapsed .map-narrative-card {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .narrative-stat .k {
   color: rgba(202, 210, 197, 0.62);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 .narrative-stat .v {
   color: var(--c-white);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
 .narrative-stat .u {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: rgba(202, 210, 197, 0.55);
   margin-left: 3px;
@@ -1710,7 +1711,7 @@ body.sidebar-collapsed .map-narrative-card {
   border: 1px solid rgba(202, 210, 197, 0.16);
   color: var(--c-white);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
 }
@@ -1729,13 +1730,13 @@ body.sidebar-collapsed .map-narrative-card {
   text-align: left;
 }
 .map-narrative-verdict .verdict-headline {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: -0.005em;
 }
 .map-narrative-verdict .verdict-detail {
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 500;
   color: rgba(202, 210, 197, 0.72);
   line-height: 1.35;

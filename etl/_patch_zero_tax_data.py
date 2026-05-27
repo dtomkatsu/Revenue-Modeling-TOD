@@ -39,9 +39,20 @@ DATA_FILE = _ROOT / "data" / "parcels_tod.geojson"
 # etl/06_compute_revenue.py's ``FY26_MILLAGE_RATES_PER_1000``, mapped to the
 # coarser bucket names that ``land_use`` uses in ``parcels_tod.geojson``.
 #
-# Preservation and Public Service deliberately omitted — those classes
-# commonly hold genuinely tax-exempt government / conservation land. The
-# rescue stays conservative and leaves them untouched.
+# Public Service is deliberately omitted — utilities (HECO et al.) hold full
+# exemptions and pay a state gross-receipts tax in lieu of county property
+# tax. RPAD correctly reports $0 net taxable for every Public Service parcel
+# (verified: TMK 98-003-010 HECO $40.7M AV → $40.7M exempt → $0 taxable; TMK
+# 99-071-001 HECO $9.9M AV → $0 taxable). A rescue here would be wrong.
+#
+# Preservation IS included. Spot-checks against RPAD show high-AV
+# Preservation parcels in the TOD corridor are typically privately held
+# with $0 exemption and the full AV taxable at $5.70/$1000:
+#   TMK 91-016-227 DAITO US INC      $20.66M taxable → ~$117,770/yr
+#   TMK 11-063-017 JJKOO HAWAII INC  $18.23M taxable → ~$103,924/yr
+#   TMK 98-011-034 Bishop Estate     $16.84M taxable → ~$96,011/yr
+# Excluding Preservation was leaving ~$800k/yr of modeled revenue on the
+# table across ~68 parcels.
 BUCKET_MILLAGE: dict[str, float] = {
     "Residential":    3.50,
     "Residential A":  4.50,  # fallback when tier unknown
@@ -49,6 +60,7 @@ BUCKET_MILLAGE: dict[str, float] = {
     "Industrial":    12.40,
     "Hotel/Resort":  13.90,
     "Agricultural":   5.70,
+    "Preservation":   5.70,
 }
 FALLBACK_AV_THRESHOLD = 50_000
 

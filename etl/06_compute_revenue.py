@@ -246,17 +246,19 @@ def compute_revenue(*, force: bool) -> int:
         # The RPAD bulk roll occasionally has "Total Net Tax" = $0 for parcels
         # that should not be exempt — most visibly for newly built homes in
         # the Hoʻopili / Mehana / Kapolei / Waipahu master-planned
-        # communities (TMK prefixes 91x / 94x). Diagnostic showed ~2,057
-        # residential + industrial + commercial parcels with AV > $50k and
-        # a non-zero class millage rate falling into this bucket — far
-        # more than the ~109 parcels that are genuinely tax-exempt
-        # (Public Service @ 0.00 millage + Preservation conservation land).
+        # communities (TMK prefixes 91x / 94x), and for high-AV Preservation
+        # parcels held by private corporations / trusts (e.g. TMK 91-016-227
+        # DAITO US INC $20.7M, TMK 11-063-017 JJKOO HAWAII $18.2M, TMK
+        # 98-011-034 Bishop Estate $16.8M — all $0 exemption per RPAD direct
+        # lookup but bulk-roll "Total Net Tax" comes through as 0).
         #
         # When direct_tax == 0 BUT AV > $50k AND the class's FY26 millage
         # is > 0, fall back to value × millage / 1000 as the estimate.
-        # Parcels in classes whose millage IS 0 (Public Service) keep
-        # their legitimate $0. Parcels with tiny AV (< $50k) also keep $0
-        # — they're more likely actual exemptions than data drops.
+        # Public Service stays at $0 because its rate is 0.00 (utilities
+        # pay state gross-receipts tax in lieu of county property tax —
+        # verified TMK 98-003-010 HECO $40.7M AV → $0 taxable). Parcels with
+        # tiny AV (< $50k) also keep $0 — more likely actual homestead /
+        # age combo exemptions than data drops.
         if value_col is not None and class_col is not None:
             FALLBACK_AV_THRESHOLD = 50_000
             fb_values  = _coerce_number(parcels[value_col])
